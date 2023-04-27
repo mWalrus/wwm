@@ -6,4 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+smallmap = "1.4.1"
 x11rb = { version = "0.11.1", features = ["cursor", "libc"] }

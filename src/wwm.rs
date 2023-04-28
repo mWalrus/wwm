@@ -1,12 +1,14 @@
-use std::process::exit;
+use std::{cmp::Reverse, collections::BinaryHeap, process::exit};
 
 use smallmap::Map;
 use x11rb::{
     connection::Connection,
     protocol::{
         xproto::{
-            Atom, ChangeWindowAttributesAux, ConnectionExt, CreateWindowAux, EventMask,
-            GetGeometryReply, MapState, Screen, SetMode, Window, WindowClass,
+            Atom, ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux,
+            ConfigureRequestEvent, ConnectionExt, CreateWindowAux, EnterNotifyEvent, EventMask,
+            ExposeEvent, GetGeometryReply, MapRequestEvent, MapState, MotionNotifyEvent, Screen,
+            SetMode, UnmapNotifyEvent, Window, WindowClass,
         },
         ErrorKind,
     },
@@ -18,9 +20,9 @@ use crate::config::theme;
 
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
-    wm_detected: bool,
     screen_num: usize,
     clients: Map<Window, Window>,
+    ignore_sequences: BinaryHeap<Reverse<u16>>,
     wm_protocols: Atom,
     wm_delete_window: Atom,
 }
@@ -35,9 +37,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let mut wwm = Self {
             conn,
-            wm_detected: false,
             screen_num,
             clients: Map::with_capacity(256),
+            ignore_sequences: Default::default(),
             wm_protocols: wm_protocols.reply().unwrap().atom,
             wm_delete_window: wm_delete_window.reply().unwrap().atom,
         };
@@ -127,20 +129,60 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.grab_server()?;
         self.conn.change_save_set(SetMode::INSERT, win)?;
 
-        // figure this out:
-        // https://github.com/psychon/x11rb/blob/master/x11rb/examples/simple_window_manager.rs#L156-L170
         let cookie = self.conn.reparent_window(win, frame_win, 0, 0)?;
+
         self.conn.map_window(win)?;
         self.conn.map_window(frame_win)?;
         self.conn.ungrab_server()?;
 
         self.clients.insert(frame_win, win);
 
+        // remember and ignore all reparent_window events
+        self.ignore_sequences
+            .push(Reverse(cookie.sequence_number() as u16));
+
         Ok(())
     }
 
     fn window_id_in_use(&self, win: Window) -> bool {
         self.clients.contains_key(&win)
+    }
+
+    fn refresh(&mut self) {
+        // TODO: when the bar is implemented, we want to update the bar information here
+        todo!()
+    }
+
+    fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) {
+        todo!()
+    }
+
+    fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) {
+        todo!()
+    }
+
+    fn handle_map_request(&mut self, evt: MapRequestEvent) {
+        todo!()
+    }
+
+    fn handle_expose(&mut self, evt: ExposeEvent) {
+        todo!()
+    }
+
+    fn handle_enter(&mut self, evt: EnterNotifyEvent) {
+        todo!()
+    }
+
+    fn handle_button_press(&mut self, evt: ButtonPressEvent) {
+        todo!()
+    }
+
+    fn handle_button_release(&mut self, evt: ButtonReleaseEvent) {
+        todo!()
+    }
+
+    fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) {
+        todo!()
     }
 
     pub fn run() {

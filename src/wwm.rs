@@ -14,7 +14,7 @@ use x11rb::{
     COPY_DEPTH_FROM_PARENT,
 };
 
-use crate::theme;
+use crate::config::theme;
 
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
@@ -107,7 +107,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     | EventMask::POINTER_MOTION
                     | EventMask::ENTER_WINDOW,
             )
-            .border_pixel(theme::border::OFF)
+            .border_pixel(theme::WINDOW_BORDER_UNFOCUSED)
             .background_pixel(screen.black_pixel);
 
         self.conn.create_window(

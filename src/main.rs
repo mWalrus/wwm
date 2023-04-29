@@ -6,5 +6,6 @@ use x11rb::connect;
 
 fn main() {
     let (conn, screen_num) = connect(None).unwrap();
-    WinMan::init(&conn, screen_num);
+    let mut wwm = WinMan::init(&conn, screen_num);
+    wwm.run().unwrap();
 }

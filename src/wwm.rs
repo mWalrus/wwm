@@ -1,4 +1,8 @@
-use std::{cmp::Reverse, collections::BinaryHeap, process::exit};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashSet},
+    process::exit,
+};
 
 use smallmap::Map;
 use x11rb::{
@@ -6,25 +10,57 @@ use x11rb::{
     protocol::{
         xproto::{
             Atom, ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux,
-            ConfigureRequestEvent, ConnectionExt, CreateWindowAux, EnterNotifyEvent, EventMask,
-            ExposeEvent, GetGeometryReply, MapRequestEvent, MapState, MotionNotifyEvent, Screen,
-            SetMode, UnmapNotifyEvent, Window, WindowClass,
+            ClientMessageEvent, ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt,
+            CreateWindowAux, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
+            InputFocus, MapRequestEvent, MapState, MotionNotifyEvent, Screen, SetMode, StackMode,
+            UnmapNotifyEvent, Window, WindowClass,
         },
-        ErrorKind,
+        ErrorKind, Event,
     },
     rust_connection::{ReplyError, ReplyOrIdError},
-    COPY_DEPTH_FROM_PARENT,
+    COPY_DEPTH_FROM_PARENT, CURRENT_TIME,
 };
 
-use crate::config::theme;
+use crate::config::{keymap::DRAG_BUTTON, theme};
+
+const CLIENT_CAP: usize = 256;
+
+#[derive(Debug)]
+struct ClientState {
+    window: Window,
+    frame: Window,
+    x: i16,
+    y: i16,
+    width: u16,
+}
+
+impl ClientState {
+    fn new(window: Window, frame: Window, geom: &GetGeometryReply) -> Self {
+        Self {
+            window,
+            frame,
+            x: geom.x,
+            y: geom.y,
+            width: geom.width,
+        }
+    }
+}
 
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen_num: usize,
-    clients: Map<Window, Window>,
+    clients: Vec<ClientState>,
     ignore_sequences: BinaryHeap<Reverse<u16>>,
+    pending_exposure: HashSet<Window>,
     wm_protocols: Atom,
     wm_delete_window: Atom,
+    drag_window: Option<(Window, (i16, i16))>,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum ShouldExit {
+    Yes,
+    No,
 }
 
 impl<'a, C: Connection> WinMan<'a, C> {
@@ -38,10 +74,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let mut wwm = Self {
             conn,
             screen_num,
-            clients: Map::with_capacity(256),
+            clients: Vec::with_capacity(CLIENT_CAP),
             ignore_sequences: Default::default(),
+            pending_exposure: Default::default(),
             wm_protocols: wm_protocols.reply().unwrap().atom,
             wm_delete_window: wm_delete_window.reply().unwrap().atom,
+            drag_window: None,
         };
 
         // take care of potentially unmanaged windows
@@ -135,7 +173,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.map_window(frame_win)?;
         self.conn.ungrab_server()?;
 
-        self.clients.insert(frame_win, win);
+        self.clients.push(ClientState::new(win, frame_win, geom));
 
         // remember and ignore all reparent_window events
         self.ignore_sequences
@@ -145,7 +183,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn window_id_in_use(&self, win: Window) -> bool {
-        self.clients.contains_key(&win)
+        self.clients
+            .iter()
+            .find(|c| c.window == win || c.frame == win)
+            .is_some()
     }
 
     fn refresh(&mut self) {
@@ -154,38 +195,153 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) {
-        todo!()
+        let root = self.conn.setup().roots[self.screen_num].root;
+        let conn = self.conn;
+
+        self.clients.retain(|state| {
+            if state.window != evt.window {
+                return true;
+            }
+
+            conn.change_save_set(SetMode::DELETE, state.window).unwrap();
+            conn.reparent_window(state.window, root, state.x, state.y)
+                .unwrap();
+            conn.destroy_window(state.frame).unwrap();
+            false
+        });
     }
 
-    fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) {
-        todo!()
+    fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
+        if let Some(state) = self.find_client_by_id_mut(evt.window) {
+            let _ = state;
+            unimplemented!();
+        }
+
+        let aux = ConfigureWindowAux::from_configure_request(&evt)
+            .sibling(None)
+            .stack_mode(None);
+        self.conn.configure_window(evt.window, &aux)?;
+        Ok(())
     }
 
-    fn handle_map_request(&mut self, evt: MapRequestEvent) {
-        todo!()
+    fn handle_map_request(&mut self, evt: MapRequestEvent) -> Result<(), ReplyOrIdError> {
+        self.manage_window(evt.window, &self.conn.get_geometry(evt.window)?.reply()?)
     }
 
     fn handle_expose(&mut self, evt: ExposeEvent) {
-        todo!()
+        self.pending_exposure.insert(evt.window);
     }
 
-    fn handle_enter(&mut self, evt: EnterNotifyEvent) {
-        todo!()
+    fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyError> {
+        if let Some(state) = self.find_client_by_id(evt.event) {
+            self.conn
+                .set_input_focus(InputFocus::PARENT, state.window, CURRENT_TIME)?;
+            self.conn.configure_window(
+                state.frame,
+                &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
+            )?;
+        }
+        Ok(())
     }
 
     fn handle_button_press(&mut self, evt: ButtonPressEvent) {
-        todo!()
+        if evt.detail != DRAG_BUTTON || u16::from(evt.state) != 0 {
+            return;
+        }
+        if let Some(state) = self.find_client_by_id(evt.event) {
+            if self.drag_window.is_none() && evt.event_x < 0.max(state.width as i16) {
+                let (x, y) = (-evt.event_x, -evt.event_y);
+                self.drag_window = Some((state.frame, (x, y)));
+            }
+        }
     }
 
-    fn handle_button_release(&mut self, evt: ButtonReleaseEvent) {
-        todo!()
+    fn handle_button_release(&mut self, evt: ButtonReleaseEvent) -> Result<(), ReplyError> {
+        if evt.detail == DRAG_BUTTON {
+            self.drag_window = None;
+        }
+
+        if let Some(state) = self.find_client_by_id(evt.event) {
+            if evt.event_x >= 0.max(state.width as i16) {
+                let event = ClientMessageEvent::new(
+                    32,
+                    state.window,
+                    self.wm_protocols,
+                    [self.wm_delete_window, 0, 0, 0, 0],
+                );
+                self.conn
+                    .send_event(false, state.window, EventMask::NO_EVENT, event)?;
+            }
+        }
+        Ok(())
     }
 
-    fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) {
-        todo!()
+    fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyError> {
+        if let Some((win, (x, y))) = self.drag_window {
+            let (x, y) = (x + evt.root_x, y + evt.root_y);
+            let (x, y) = (x as i32, y as i32);
+            self.conn
+                .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+        }
+        Ok(())
     }
 
-    pub fn run() {
-        todo!()
+    fn handle_event(&mut self, evt: Event) -> Result<ShouldExit, ReplyOrIdError> {
+        let mut should_ignore = false;
+
+        if let Some(seqno) = evt.wire_sequence_number() {
+            while let Some(&Reverse(to_ignore)) = self.ignore_sequences.peek() {
+                if to_ignore.wrapping_sub(seqno) <= u16::MAX / 2 {
+                    should_ignore = to_ignore == seqno;
+                    break;
+                }
+                self.ignore_sequences.pop();
+            }
+        }
+
+        if should_ignore {
+            return Ok(ShouldExit::No);
+        }
+
+        // TODO: key press/release events
+        match evt {
+            Event::UnmapNotify(e) => self.handle_unmap_notify(e),
+            Event::ConfigureRequest(e) => self.handle_configure_request(e)?,
+            Event::MapRequest(e) => self.handle_map_request(e)?,
+            Event::Expose(e) => self.handle_expose(e),
+            Event::EnterNotify(e) => self.handle_enter(e)?,
+            Event::ButtonPress(e) => self.handle_button_press(e),
+            Event::ButtonRelease(e) => self.handle_button_release(e)?,
+            Event::MotionNotify(e) => self.handle_motion_notify(e)?,
+            _ => {}
+        }
+
+        Ok(ShouldExit::No)
+    }
+
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        'eventloop: loop {
+            // self.refresh();
+            self.conn.flush()?;
+
+            while let Some(event) = self.conn.wait_for_event().ok() {
+                if self.handle_event(event)? == ShouldExit::Yes {
+                    break 'eventloop;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn find_client_by_id_mut(&mut self, win: Window) -> Option<&mut ClientState> {
+        self.clients
+            .iter_mut()
+            .find(|state| state.window == win || state.frame == win)
+    }
+
+    fn find_client_by_id(&self, win: Window) -> Option<&ClientState> {
+        self.clients
+            .iter()
+            .find(|state| state.window == win || state.frame == win)
     }
 }

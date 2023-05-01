@@ -31,7 +31,7 @@ fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
 
     let mut rects = vec![ClientRect::new(0, 0, main_width, mon.height)];
 
-    let stack_width = mon.width_from_percentage(1f32 - MAIN_CLIENT_WIDTH_PERCENTAGE);
+    let stack_width = mon.width - main_width;
 
     let non_main_window_count = clients.len() - 1;
     let stack_client_height = mon.client_height(non_main_window_count);

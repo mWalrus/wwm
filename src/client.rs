@@ -58,7 +58,6 @@ pub struct ClientState {
     pub window: Window,
     pub frame: Window,
     pub rect: ClientRect,
-    pub pending_configure: bool,
 }
 
 impl ClientState {
@@ -67,12 +66,6 @@ impl ClientState {
             window,
             frame,
             rect: geom.into(),
-            pending_configure: false,
         }
-    }
-
-    pub fn update_rect(&mut self, rect: ClientRect) {
-        self.rect = rect;
-        self.pending_configure;
     }
 }

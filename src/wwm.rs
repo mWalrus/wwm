@@ -1,10 +1,14 @@
+use crate::{
+    client::ClientState,
+    config::{keymap::DRAG_BUTTON, theme},
+    layouts::{layout_clients, WLayout},
+    monitor::Monitor,
+};
 use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashSet},
     process::exit,
 };
-
-use smallmap::Map;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -21,30 +25,7 @@ use x11rb::{
     COPY_DEPTH_FROM_PARENT, CURRENT_TIME,
 };
 
-use crate::config::{keymap::DRAG_BUTTON, theme};
-
 const CLIENT_CAP: usize = 256;
-
-#[derive(Debug)]
-struct ClientState {
-    window: Window,
-    frame: Window,
-    x: i16,
-    y: i16,
-    width: u16,
-}
-
-impl ClientState {
-    fn new(window: Window, frame: Window, geom: &GetGeometryReply) -> Self {
-        Self {
-            window,
-            frame,
-            x: geom.x,
-            y: geom.y,
-            width: geom.width,
-        }
-    }
-}
 
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
@@ -55,6 +36,7 @@ pub struct WinMan<'a, C: Connection> {
     wm_protocols: Atom,
     wm_delete_window: Atom,
     drag_window: Option<(Window, (i16, i16))>,
+    layout: WLayout,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -80,6 +62,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             wm_protocols: wm_protocols.reply().unwrap().atom,
             wm_delete_window: wm_delete_window.reply().unwrap().atom,
             drag_window: None,
+            layout: WLayout::Tile,
         };
 
         // take care of potentially unmanaged windows
@@ -179,6 +162,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.ignore_sequences
             .push(Reverse(cookie.sequence_number() as u16));
 
+        self.recompute_layout(screen)?;
+
         Ok(())
     }
 
@@ -187,6 +172,34 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .iter()
             .find(|c| c.window == win || c.frame == win)
             .is_some()
+    }
+
+    fn recompute_layout(&mut self, s: &Screen) -> Result<(), ReplyOrIdError> {
+        let rects = layout_clients(
+            &Monitor {
+                x: 0,
+                y: 0,
+                width: s.width_in_pixels,
+                height: s.height_in_pixels,
+            },
+            &self.clients,
+            &self.layout,
+        );
+
+        for (i, (state, rect)) in self.clients.iter().zip(rects).enumerate() {
+            println!(
+                "Configuring window #{i}: win_id: {}, rect: {rect:#?}",
+                state.window
+            );
+            let frame_aux = ConfigureWindowAux::from(rect)
+                .sibling(None)
+                .stack_mode(None);
+            let client_aux = frame_aux.clone().x(0).y(0);
+            self.conn.configure_window(state.window, &client_aux)?;
+            self.conn.configure_window(state.frame, &frame_aux)?;
+            self.conn.flush()?;
+        }
+        Ok(())
     }
 
     fn refresh(&mut self) {
@@ -204,7 +217,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
 
             conn.change_save_set(SetMode::DELETE, state.window).unwrap();
-            conn.reparent_window(state.window, root, state.x, state.y)
+            conn.reparent_window(state.window, root, state.rect.x, state.rect.y)
                 .unwrap();
             conn.destroy_window(state.frame).unwrap();
             false
@@ -249,7 +262,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return;
         }
         if let Some(state) = self.find_client_by_id(evt.event) {
-            if self.drag_window.is_none() && evt.event_x < 0.max(state.width as i16) {
+            if self.drag_window.is_none() && evt.event_x < 0.max(state.rect.width as i16) {
                 let (x, y) = (-evt.event_x, -evt.event_y);
                 self.drag_window = Some((state.frame, (x, y)));
             }
@@ -262,7 +275,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         if let Some(state) = self.find_client_by_id(evt.event) {
-            if evt.event_x >= 0.max(state.width as i16) {
+            if evt.event_x >= 0.max(state.rect.width as i16) {
                 let event = ClientMessageEvent::new(
                     32,
                     state.window,

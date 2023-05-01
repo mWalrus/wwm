@@ -1,4 +1,7 @@
+mod client;
 mod config;
+mod layouts;
+mod monitor;
 mod wwm;
 
 use wwm::WinMan;

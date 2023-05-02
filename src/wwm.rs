@@ -188,11 +188,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             &self.layout,
         );
 
-        for (i, (state, rect)) in self.clients.iter().zip(rects).enumerate() {
-            println!(
-                "Configuring window #{i}: win_id: {}, rect: {rect:#?}",
-                state.window
-            );
+        for (state, rect) in self.clients.iter().zip(rects) {
             let frame_aux = ConfigureWindowAux::from(rect)
                 .sibling(None)
                 .stack_mode(None);

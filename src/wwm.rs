@@ -37,6 +37,7 @@ pub struct WinMan<'a, C: Connection> {
     wm_delete_window: Atom,
     drag_window: Option<(Window, (i16, i16))>,
     layout: WLayout,
+    last_focused: Option<Window>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -63,6 +64,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             wm_delete_window: wm_delete_window.reply().unwrap().atom,
             drag_window: None,
             layout: WLayout::Tile,
+            last_focused: None,
         };
 
         // take care of potentially unmanaged windows
@@ -246,14 +248,46 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyError> {
-        if let Some(state) = self.find_client_by_id(evt.event) {
-            self.conn
-                .set_input_focus(InputFocus::PARENT, state.window, CURRENT_TIME)?;
-            self.conn.configure_window(
-                state.frame,
-                &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
-            )?;
+        let (frame, window) = {
+            if let Some(state) = self.find_client_by_id(evt.event) {
+                (state.frame, state.window)
+            } else {
+                return Ok(());
+            }
+        };
+        if let Some(last_frame) = self.last_focused {
+            if frame != last_frame {
+                self.focus(frame, window)?;
+                self.unfocus(last_frame)?;
+            }
+        } else {
+            self.focus(frame, window)?;
         }
+        Ok(())
+    }
+
+    fn focus(&mut self, frame: Window, window: Window) -> Result<(), ReplyError> {
+        self.conn
+            .set_input_focus(InputFocus::PARENT, window, CURRENT_TIME)?;
+        self.conn.configure_window(
+            frame,
+            &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
+        )?;
+
+        let focus_aux = ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_FOCUSED);
+        self.conn.change_window_attributes(frame, &focus_aux)?;
+        self.conn.flush()?;
+
+        self.last_focused = Some(frame);
+
+        Ok(())
+    }
+
+    fn unfocus(&mut self, frame: Window) -> Result<(), ReplyError> {
+        let unfocus_aux =
+            ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_UNFOCUSED);
+        self.conn.change_window_attributes(frame, &unfocus_aux)?;
+        self.conn.flush()?;
         Ok(())
     }
 

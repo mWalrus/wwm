@@ -1,6 +1,6 @@
 use crate::{
     client::ClientState,
-    config::{keymap::DRAG_BUTTON, theme},
+    config::{keymap::MOD_KEY, mouse::DRAG_BUTTON, theme},
     layouts::{layout_clients, WLayout},
     monitor::Monitor,
 };
@@ -15,9 +15,9 @@ use x11rb::{
         xproto::{
             Atom, ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux,
             ClientMessageEvent, ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt,
-            CreateWindowAux, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
-            InputFocus, MapRequestEvent, MapState, MotionNotifyEvent, Screen, SetMode, StackMode,
-            UnmapNotifyEvent, Window, WindowClass,
+            CreateWindowAux, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, GrabMode,
+            GrabStatus, InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent,
+            Screen, SetMode, StackMode, UnmapNotifyEvent, Window, WindowClass,
         },
         ErrorKind, Event,
     },
@@ -77,8 +77,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         // set up substructure redirects for the root window.
         // NOTE: this will fail if another window manager is already running
         let screen = &conn.setup().roots[screen_num];
-        let change = ChangeWindowAttributesAux::default()
-            .event_mask(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY);
+        let change = ChangeWindowAttributesAux::default().event_mask(
+            EventMask::SUBSTRUCTURE_REDIRECT
+                | EventMask::SUBSTRUCTURE_NOTIFY
+                | EventMask::KEY_PRESS
+                | EventMask::KEY_RELEASE,
+        );
         let res = conn
             .change_window_attributes(screen.root, &change)
             .unwrap()
@@ -89,6 +93,22 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 exit(1);
             }
         }
+
+        let grab_cookie = conn.grab_keyboard(
+            true,
+            screen.root,
+            CURRENT_TIME,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+        )?;
+
+        if let Ok(r) = grab_cookie.reply() {
+            if r.status == GrabStatus::SUCCESS {
+                // TODO: actual logger
+                println!("Successfully grabbed the keyboard");
+            }
+        }
+
         res
     }
 
@@ -332,6 +352,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
+    fn handle_key_press(&mut self, evt: KeyPressEvent) -> Result<(), ReplyOrIdError> {
+        println!("{evt:#?}");
+
+        // TODO: https://github.com/psychon/x11rb/issues/782#issuecomment-1367881755
+
+        Ok(())
+    }
+
     fn handle_event(&mut self, evt: Event) -> Result<ShouldExit, ReplyOrIdError> {
         let mut should_ignore = false;
 
@@ -359,6 +387,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::ButtonPress(e) => self.handle_button_press(e),
             Event::ButtonRelease(e) => self.handle_button_release(e)?,
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
+            Event::KeyPress(e) => self.handle_key_press(e)?,
             _ => {}
         }
 

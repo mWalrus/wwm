@@ -209,8 +209,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         todo!()
     }
 
-    fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) {
-        let root = self.conn.setup().roots[self.screen_num].root;
+    fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) -> Result<(), ReplyOrIdError> {
+        let screen = &self.conn.setup().roots[self.screen_num];
+        let root = screen.root;
         let conn = self.conn;
 
         self.clients.retain(|state| {
@@ -224,6 +225,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             conn.destroy_window(state.frame).unwrap();
             false
         });
+        self.recompute_layout(screen)?;
+        Ok(())
     }
 
     fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
@@ -352,7 +355,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         // TODO: key press/release events
         match evt {
-            Event::UnmapNotify(e) => self.handle_unmap_notify(e),
+            Event::UnmapNotify(e) => self.handle_unmap_notify(e)?,
             Event::ConfigureRequest(e) => self.handle_configure_request(e)?,
             Event::MapRequest(e) => self.handle_map_request(e)?,
             Event::Expose(e) => self.handle_expose(e),

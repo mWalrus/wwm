@@ -37,17 +37,15 @@ fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
         mon.height - bw * 2,
     )];
 
-    let stack_width = mon.width - main_width;
-
     let non_main_window_count = clients.len() - 1;
     let stack_client_height = mon.height / non_main_window_count as u16;
 
     for i in 0..non_main_window_count {
         rects.push(ClientRect::new(
-            (main_width - bw) as i16,
-            (i as u16 * stack_client_height).saturating_sub(bw) as i16,
-            stack_width - bw,
-            stack_client_height - bw,
+            main_width as i16,
+            (i as u16 * stack_client_height) as i16,
+            mon.width - main_width - (bw * 2),
+            stack_client_height - (bw * 2),
         ));
     }
 
@@ -61,15 +59,13 @@ fn col(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     }
     let mut rects = vec![];
     let client_width = mon.width / clients.len() as u16;
-    let mut x_offset = 0;
-    for _ in 0..clients.len() {
+    for i in 0..clients.len() {
         rects.push(ClientRect::new(
-            x_offset,
+            i as i16 * client_width as i16,
             0,
-            client_width,
-            mon.height - bw * 2,
+            mon.width - client_width - (bw * 2),
+            mon.height - (bw * 2),
         ));
-        x_offset += (client_width - bw) as i16;
     }
     rects
 }

@@ -1,6 +1,6 @@
 use crate::{
     client::{ClientRect, ClientState},
-    config::window::{GAP_SIZE, MAIN_CLIENT_WIDTH_PERCENTAGE},
+    config::window::MAIN_CLIENT_WIDTH_PERCENTAGE,
     monitor::Monitor,
 };
 
@@ -17,19 +17,15 @@ pub fn layout_clients(
 ) -> Vec<ClientRect> {
     match layout {
         WLayout::Tile => tile(mon, clients),
+        WLayout::Column => col(mon, clients),
         _ => todo!(),
     }
 }
 
 fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
-    let bw = clients.get(0).unwrap().border_width;
+    let bw = clients[0].border_width;
     if clients.len() == 1 {
-        return vec![ClientRect::new(
-            0,
-            0,
-            mon.width - bw * 2,
-            mon.height - bw * 2,
-        )];
+        return single_client(mon, bw);
     }
 
     let main_width = mon.width_from_percentage(MAIN_CLIENT_WIDTH_PERCENTAGE);
@@ -56,4 +52,33 @@ fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     }
 
     rects
+}
+
+fn col(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
+    let bw = clients[0].border_width;
+    if clients.len() == 1 {
+        return single_client(mon, bw);
+    }
+    let mut rects = vec![];
+    let client_width = mon.width / clients.len() as u16;
+    let mut x_offset = 0;
+    for _ in 0..clients.len() {
+        rects.push(ClientRect::new(
+            x_offset,
+            0,
+            client_width,
+            mon.height - bw * 2,
+        ));
+        x_offset += (client_width - bw) as i16;
+    }
+    rects
+}
+
+fn single_client(mon: &Monitor, bw: u16) -> Vec<ClientRect> {
+    vec![ClientRect::new(
+        0,
+        0,
+        mon.width - bw * 2,
+        mon.height - bw * 2,
+    )]
 }

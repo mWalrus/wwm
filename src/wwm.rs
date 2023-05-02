@@ -197,8 +197,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let client_aux = frame_aux.clone().x(0).y(0);
             self.conn.configure_window(state.window, &client_aux)?;
             self.conn.configure_window(state.frame, &frame_aux)?;
-            self.conn.flush()?;
         }
+        self.conn.flush()?;
         Ok(())
     }
 

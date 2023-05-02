@@ -58,6 +58,7 @@ pub struct ClientState {
     pub window: Window,
     pub frame: Window,
     pub rect: ClientRect,
+    pub border_width: u16,
 }
 
 impl ClientState {
@@ -66,6 +67,7 @@ impl ClientState {
             window,
             frame,
             rect: geom.into(),
+            border_width: 1,
         }
     }
 }

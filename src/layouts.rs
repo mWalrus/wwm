@@ -22,44 +22,38 @@ pub fn layout_clients(
 }
 
 fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
+    let bw = clients.get(0).unwrap().border_width;
     if clients.len() == 1 {
         return vec![ClientRect::new(
-            GAP_SIZE as i16,
-            GAP_SIZE as i16,
-            mon.width - (GAP_SIZE * 2),
-            mon.height - (GAP_SIZE * 2),
+            0,
+            0,
+            mon.width - bw * 2,
+            mon.height - bw * 2,
         )];
     }
 
-    let main_space = mon.width_from_percentage(MAIN_CLIENT_WIDTH_PERCENTAGE);
-    let main_width = apply_gap(main_space);
+    let main_width = mon.width_from_percentage(MAIN_CLIENT_WIDTH_PERCENTAGE);
 
     let mut rects = vec![ClientRect::new(
-        GAP_SIZE as i16,
-        GAP_SIZE as i16,
-        main_width,
-        mon.height - (GAP_SIZE * 2),
+        0,
+        0,
+        main_width - bw * 2,
+        mon.height - bw * 2,
     )];
 
-    let stack_width = apply_gap(mon.width - main_space);
+    let stack_width = mon.width - main_width;
 
     let non_main_window_count = clients.len() - 1;
-    let stack_client_height = apply_gap(mon.client_height(non_main_window_count));
+    let stack_client_height = mon.height / non_main_window_count as u16;
 
-    let mut y_offset = GAP_SIZE;
-    for _ in 0..non_main_window_count {
+    for i in 0..non_main_window_count {
         rects.push(ClientRect::new(
-            (main_space + (GAP_SIZE / 2)) as i16,
-            y_offset as i16,
-            stack_width,
-            stack_client_height,
+            (main_width - bw) as i16,
+            (i as u16 * stack_client_height).saturating_sub(bw) as i16,
+            stack_width - bw,
+            stack_client_height - bw,
         ));
-        y_offset += stack_client_height + GAP_SIZE;
     }
 
     rects
-}
-
-fn apply_gap(size: u16) -> u16 {
-    size - (GAP_SIZE + (GAP_SIZE / 2))
 }

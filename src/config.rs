@@ -5,7 +5,6 @@ pub mod theme {
 
 pub mod window {
     pub static MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
-    pub static GAP_SIZE: u16 = 0;
 }
 
 pub mod keymap {

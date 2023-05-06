@@ -1,8 +1,10 @@
 use crate::{
     client::ClientState,
-    config::{keymap::MOD_KEY, mouse::DRAG_BUTTON, theme},
+    config::{commands::WCommand, mouse::DRAG_BUTTON, theme},
+    keyboard::WKeyboard,
     layouts::{layout_clients, WLayout},
     monitor::Monitor,
+    AtomCollection,
 };
 use std::{
     cmp::Reverse,
@@ -12,19 +14,20 @@ use std::{
 use x11rb::{
     connection::Connection,
     protocol::{
+        xkb::StateNotifyEvent,
         xproto::{
-            Atom, ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux,
+            Allow, ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux,
             ClientMessageEvent, ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt,
-            CreateWindowAux, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, GrabMode,
-            GrabStatus, InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent,
-            Screen, SetMode, StackMode, UnmapNotifyEvent, Window, WindowClass,
+            CreateWindowAux, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
+            InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent, Screen,
+            SetMode, StackMode, UnmapNotifyEvent, Window, WindowClass,
         },
         ErrorKind, Event,
     },
     rust_connection::{ReplyError, ReplyOrIdError},
+    wrapper::ConnectionExt as _,
     COPY_DEPTH_FROM_PARENT, CURRENT_TIME,
 };
-
 const CLIENT_CAP: usize = 256;
 
 pub struct WinMan<'a, C: Connection> {
@@ -33,11 +36,12 @@ pub struct WinMan<'a, C: Connection> {
     clients: Vec<ClientState>,
     ignore_sequences: BinaryHeap<Reverse<u16>>,
     pending_exposure: HashSet<Window>,
-    wm_protocols: Atom,
-    wm_delete_window: Atom,
     drag_window: Option<(Window, (i16, i16))>,
     layout: WLayout,
-    last_focused: Option<Window>,
+    last_focused: Option<(Window, Window)>,
+    keyboard: WKeyboard,
+    atoms: AtomCollection,
+    ignore_enter: bool,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -46,13 +50,20 @@ enum ShouldExit {
     No,
 }
 
+enum StackDirection {
+    Prev,
+    Next,
+}
+
 impl<'a, C: Connection> WinMan<'a, C> {
-    pub fn init(conn: &'a C, screen_num: usize) -> Self {
+    pub fn init(
+        conn: &'a C,
+        screen_num: usize,
+        keyboard: WKeyboard,
+        atoms: AtomCollection,
+    ) -> Self {
         // TODO: error handling
         Self::become_wm(conn, screen_num).unwrap();
-
-        let wm_protocols = conn.intern_atom(false, b"WM_PROTOCOLS").unwrap();
-        let wm_delete_window = conn.intern_atom(false, b"WM_DELETE_WINDOW").unwrap();
 
         let mut wwm = Self {
             conn,
@@ -60,16 +71,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
             clients: Vec::with_capacity(CLIENT_CAP),
             ignore_sequences: Default::default(),
             pending_exposure: Default::default(),
-            wm_protocols: wm_protocols.reply().unwrap().atom,
-            wm_delete_window: wm_delete_window.reply().unwrap().atom,
             drag_window: None,
             layout: WLayout::Tile,
             last_focused: None,
+            keyboard,
+            atoms,
+            ignore_enter: false,
         };
 
         // take care of potentially unmanaged windows
         wwm.scan_windows().unwrap();
-
         wwm
     }
 
@@ -80,8 +91,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let change = ChangeWindowAttributesAux::default().event_mask(
             EventMask::SUBSTRUCTURE_REDIRECT
                 | EventMask::SUBSTRUCTURE_NOTIFY
-                | EventMask::KEY_PRESS
-                | EventMask::KEY_RELEASE,
+                | EventMask::BUTTON_PRESS
+                | EventMask::STRUCTURE_NOTIFY
+                | EventMask::PROPERTY_CHANGE,
         );
         let res = conn
             .change_window_attributes(screen.root, &change)
@@ -91,21 +103,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             if error.error_kind == ErrorKind::Access {
                 eprintln!("ERROR: Another WM is already running.");
                 exit(1);
-            }
-        }
-
-        let grab_cookie = conn.grab_keyboard(
-            true,
-            screen.root,
-            CURRENT_TIME,
-            GrabMode::ASYNC,
-            GrabMode::ASYNC,
-        )?;
-
-        if let Ok(r) = grab_cookie.reply() {
-            if r.status == GrabStatus::SUCCESS {
-                // TODO: actual logger
-                println!("Successfully grabbed the keyboard");
             }
         }
 
@@ -149,8 +146,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     | EventMask::SUBSTRUCTURE_NOTIFY
                     | EventMask::BUTTON_PRESS
                     | EventMask::BUTTON_RELEASE
+                    | EventMask::KEY_PRESS
+                    | EventMask::KEY_RELEASE
                     | EventMask::POINTER_MOTION
-                    | EventMask::ENTER_WINDOW,
+                    | EventMask::ENTER_WINDOW
+                    | EventMask::LEAVE_WINDOW
+                    | EventMask::STRUCTURE_NOTIFY
+                    | EventMask::PROPERTY_CHANGE,
             )
             .border_pixel(theme::WINDOW_BORDER_UNFOCUSED)
             .background_pixel(screen.black_pixel);
@@ -267,6 +269,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyError> {
+        // FIXME: maybe there's a better way?
+        if self.ignore_enter {
+            self.ignore_enter = false;
+            return Ok(());
+        }
+
         let (frame, window) = {
             if let Some(state) = self.find_client_by_id(evt.event) {
                 (state.frame, state.window)
@@ -274,10 +282,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 return Ok(());
             }
         };
-        if let Some(last_frame) = self.last_focused {
-            if frame != last_frame {
+        if let Some((focused_frame, _)) = self.last_focused {
+            if frame != focused_frame {
                 self.focus(frame, window)?;
-                self.unfocus(last_frame)?;
+                self.unfocus(focused_frame)?;
             }
         } else {
             self.focus(frame, window)?;
@@ -286,8 +294,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn focus(&mut self, frame: Window, window: Window) -> Result<(), ReplyError> {
+        println!("setting focus on frame {frame} containing window {window}");
         self.conn
-            .set_input_focus(InputFocus::PARENT, window, CURRENT_TIME)?;
+            .set_input_focus(InputFocus::POINTER_ROOT, window, CURRENT_TIME)?;
         self.conn.configure_window(
             frame,
             &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
@@ -297,7 +306,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.change_window_attributes(frame, &focus_aux)?;
         self.conn.flush()?;
 
-        self.last_focused = Some(frame);
+        self.last_focused = Some((frame, window));
 
         Ok(())
     }
@@ -327,18 +336,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.drag_window = None;
         }
 
-        if let Some(state) = self.find_client_by_id(evt.event) {
-            if evt.event_x >= 0.max(state.rect.width as i16) {
-                let event = ClientMessageEvent::new(
-                    32,
-                    state.window,
-                    self.wm_protocols,
-                    [self.wm_delete_window, 0, 0, 0, 0],
-                );
-                self.conn
-                    .send_event(false, state.window, EventMask::NO_EVENT, event)?;
-            }
-        }
         Ok(())
     }
 
@@ -352,11 +349,129 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
+    fn send_delete_event(&mut self, window: Window) -> Result<(), ReplyError> {
+        let event = ClientMessageEvent::new(
+            32,
+            window,
+            self.atoms.WM_PROTOCOLS,
+            [self.atoms.WM_DELETE_WINDOW, 0, 0, 0, 0],
+        );
+        self.conn
+            .send_event(false, window, EventMask::NO_EVENT, event)?;
+        self.conn.flush()?;
+        let screen = &self.conn.setup().roots[self.screen_num];
+        self.recompute_layout(screen).unwrap();
+        Ok(())
+    }
+
     fn handle_key_press(&mut self, evt: KeyPressEvent) -> Result<(), ReplyOrIdError> {
-        println!("{evt:#?}");
+        println!("=========== got keypress");
+        let sym = self.keyboard.key_sym(evt.detail.into());
 
-        // TODO: https://github.com/psychon/x11rb/issues/782#issuecomment-1367881755
+        let mut action = WCommand::PassThrough;
+        for bind in &self.keyboard.keybinds {
+            if bind.keysym == sym && evt.state == bind.mods_as_key_but_mask() {
+                action = bind.action
+            }
+        }
 
+        match action {
+            WCommand::FocusUp => self.focus_adjacent(StackDirection::Prev),
+            WCommand::FocusDown => self.focus_adjacent(StackDirection::Next),
+            WCommand::MoveUp => self.move_adjacent(StackDirection::Prev)?,
+            WCommand::MoveDown => self.move_adjacent(StackDirection::Next)?,
+            WCommand::Spawn(cmd) => {
+                println!("running spawn command: {cmd:?}");
+            }
+            WCommand::Destroy => {
+                if let Some((_, window)) = self.last_focused {
+                    println!("Destroying window {window}");
+                    if let Err(e) = self.send_delete_event(window) {
+                        eprintln!("Failed to kill window {window} gracefully, force killing");
+                        eprintln!("ERROR: {e}");
+                        self.conn.kill_client(window)?;
+                    }
+                    self.focus_adjacent(StackDirection::Next);
+                }
+            }
+            WCommand::PassThrough => {
+                // LINK: https://www.x.org/releases/X11R7.6/doc/xproto/x11protocol.html#requests:AllowEvents
+                // LINK: https://www.x.org/releases/X11R7.6/doc/xproto/x11protocol.html#requests:GrabKeyboard
+                if let Some((_, window)) = self.last_focused {
+                    println!("Sending key event to window {window}");
+                    self.conn
+                        .allow_events(Allow::REPLAY_KEYBOARD, CURRENT_TIME)?;
+                    self.conn.sync()?;
+                    self.conn
+                        .send_event(true, window, EventMask::KEY_PRESS, evt)?;
+                    println!("Flushing event pool");
+                    self.conn.flush()?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn move_adjacent(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
+        if let Some(idx) = self.currently_focused_client_index() {
+            let new_idx = self.client_idx_from_direction(idx, dir);
+            let screen = &self.conn.setup().roots[self.screen_num];
+            self.clients.swap(new_idx, idx);
+
+            let ClientState { frame, .. } = self.clients[idx];
+            self.unfocus(frame)?;
+
+            let ClientState { window, frame, .. } = self.clients[new_idx];
+            self.focus(frame, window)?;
+
+            // NOTE: since the cursor stays in the same spot after moving clients
+            // we will generate a `EnterNotify` event since we are now hovering a new window.
+            // This flag helps the enter notify handler to decide whether we want to
+            // process the event.
+            self.ignore_enter = true;
+            self.recompute_layout(screen)?;
+        }
+        Ok(())
+    }
+
+    fn focus_adjacent(&mut self, dir: StackDirection) {
+        if let Some(idx) = self.currently_focused_client_index() {
+            let (frame, _) = self.last_focused.unwrap();
+            self.unfocus(frame).unwrap();
+
+            let new_idx = self.client_idx_from_direction(idx, dir);
+            let ClientState { frame, window, .. } = self.clients[new_idx];
+            self.focus(frame, window).unwrap();
+        } else {
+            eprintln!("ERROR: could not find index of focused client");
+        }
+    }
+
+    fn client_idx_from_direction(&self, idx: usize, dir: StackDirection) -> usize {
+        match dir {
+            StackDirection::Prev => {
+                if idx == 0 {
+                    self.clients.len() - 1
+                } else {
+                    idx - 1
+                }
+            }
+            StackDirection::Next => {
+                if idx == self.clients.len() - 1 {
+                    0
+                } else {
+                    idx + 1
+                }
+            }
+        }
+    }
+
+    fn handle_xkb_state_notify(&mut self, evt: StateNotifyEvent) -> Result<(), ReplyOrIdError> {
+        println!("EVENT: {evt:#?}");
+        if i32::try_from(evt.device_id).unwrap() == self.keyboard.device_id {
+            self.keyboard.update_state_mask(evt);
+        }
         Ok(())
     }
 
@@ -377,7 +492,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(ShouldExit::No);
         }
 
-        // TODO: key press/release events
         match evt {
             Event::UnmapNotify(e) => self.handle_unmap_notify(e)?,
             Event::ConfigureRequest(e) => self.handle_configure_request(e)?,
@@ -388,6 +502,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::ButtonRelease(e) => self.handle_button_release(e)?,
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
             Event::KeyPress(e) => self.handle_key_press(e)?,
+            Event::XkbStateNotify(e) => self.handle_xkb_state_notify(e)?,
+            Event::Error(e) => eprintln!("ERROR: {e:#?}"),
             _ => {}
         }
 
@@ -406,6 +522,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         }
         Ok(())
+    }
+
+    fn currently_focused_client_index(&self) -> Option<usize> {
+        if let Some((frame, _)) = self.last_focused {
+            return self.clients.iter().position(|state| state.frame == frame);
+        }
+        None
     }
 
     fn find_client_by_id_mut(&mut self, win: Window) -> Option<&mut ClientState> {

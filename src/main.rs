@@ -15,6 +15,7 @@ atom_manager! {
     pub AtomCollection: AtomCollectionsCookie {
         WM_PROTOCOLS,
         WM_DELETE_WINDOW,
+        ATOM_ATOM,
     }
 }
 

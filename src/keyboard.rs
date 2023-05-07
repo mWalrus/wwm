@@ -1,7 +1,7 @@
 use x11rb::connection::RequestConnection;
 use x11rb::protocol::xkb::{self, ConnectionExt as _, StateNotifyEvent};
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask, Screen};
-use xcb::x::GRAB_ANY;
+use xcb::x::{Keysym, GRAB_ANY};
 use xkbcommon::xkb::State as KBState;
 use xkbcommon::xkb::{self as xkbc, KEY_Num_Lock};
 
@@ -10,7 +10,6 @@ use crate::config::commands::{self, WKeybind};
 pub struct WKeyboard {
     state: KBState,
     pub device_id: i32,
-    pub grabbed: bool,
     pub keybinds: Vec<WKeybind>,
 }
 
@@ -83,24 +82,36 @@ impl WKeyboard {
         ];
 
         conn.ungrab_key(GRAB_ANY, screen.root, ModMask::ANY)?;
-        for keybind in &keybinds {
-            let mod_mask = ModMask::from(u16::from(keybind.mods));
-            for m in &modifiers {
-                conn.grab_key(
-                    true,
-                    screen.root,
-                    mod_mask | *m,
-                    keybind.keysym as u8,
-                    GrabMode::ASYNC,
-                    GrabMode::ASYNC,
-                )?;
+
+        let (start, end) = (keymap.min_keycode(), keymap.max_keycode());
+
+        for k in start..end {
+            let syms = state.key_get_syms(k);
+
+            if syms.is_empty() {
+                continue;
+            }
+
+            for keybind in &keybinds {
+                if syms.contains(&keybind.keysym) {
+                    println!("GRAB: {:#?}", keybind);
+                    for m in &modifiers {
+                        conn.grab_key(
+                            true,
+                            screen.root,
+                            keybind.mods | *m,
+                            k as u8,
+                            GrabMode::ASYNC,
+                            GrabMode::ASYNC,
+                        )?;
+                    }
+                }
             }
         }
 
         Ok(Self {
             state,
             device_id,
-            grabbed: false,
             keybinds,
         })
     }
@@ -116,7 +127,11 @@ impl WKeyboard {
         );
     }
 
-    pub fn key_sym(&self, detail: u32) -> u32 {
-        self.state.key_get_one_sym(detail)
+    pub fn key_sym(&self, detail: u32) -> Keysym {
+        // we adjust for shift level here
+        let level = self
+            .state
+            .key_get_level(detail, self.state.key_get_layout(detail));
+        self.state.key_get_one_sym(detail) + (level * 32)
     }
 }

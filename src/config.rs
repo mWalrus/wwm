@@ -59,13 +59,11 @@ pub mod commands {
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
-        // TODO: grab each of the keys like they do in dwm @ LINE 1029
-        // TODO: figure out how dwm sends the non-keybind keystrokes through to the client
         vec![
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_K,      WCommand::MoveUp),
-            WKeybind::new(MOD | SHIFT, ks::KEY_J,      WCommand::MoveDown),
-            WKeybind::new(MOD | SHIFT, ks::KEY_Q,      WCommand::Destroy),
+            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveUp),
+            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveDown),
+            WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
             WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusDown),
             WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusUp),
             WKeybind::new(MOD,         ks::KEY_q,      WCommand::Exit),

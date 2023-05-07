@@ -1,14 +1,10 @@
 use crate::{
     client::ClientState,
-    config::{
-        commands::{WCommand, SHIFT},
-        mouse::DRAG_BUTTON,
-        theme,
-    },
+    config::{commands::WCommand, mouse::DRAG_BUTTON, theme},
     keyboard::WKeyboard,
     layouts::{layout_clients, WLayout},
-    monitor::Monitor,
-    AtomCollection, AtomCollectionsCookie,
+    monitor::{StackDirection, WMonitor, WWorkspace},
+    AtomCollection,
 };
 use std::{
     cmp::Reverse,
@@ -18,31 +14,30 @@ use std::{
 use x11rb::{
     connection::Connection,
     protocol::{
+        randr::ConnectionExt as _,
         xkb::StateNotifyEvent,
         xproto::{
-            Allow, ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux,
-            ClientMessageEvent, ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt,
-            CreateWindowAux, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
-            InputFocus, KeyButMask, KeyPressEvent, MapRequestEvent, MapState, ModMask,
-            MotionNotifyEvent, Screen, SetMode, StackMode, UnmapNotifyEvent, Window, WindowClass,
+            ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
+            ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, CreateWindowAux,
+            EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, InputFocus, KeyPressEvent,
+            MapRequestEvent, MapState, MotionNotifyEvent, Screen, SetMode, StackMode,
+            UnmapNotifyEvent, Window, WindowClass,
         },
         ErrorKind, Event,
     },
     rust_connection::{ReplyError, ReplyOrIdError},
-    wrapper::ConnectionExt as _,
     COPY_DEPTH_FROM_PARENT, CURRENT_TIME,
 };
-const CLIENT_CAP: usize = 256;
 
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
-    screen_num: usize,
-    clients: Vec<ClientState>,
+    screen: &'a Screen,
+    monitors: Vec<WMonitor>,
+    focused_monitor: usize,
     ignore_sequences: BinaryHeap<Reverse<u16>>,
     pending_exposure: HashSet<Window>,
     drag_window: Option<(Window, (i16, i16))>,
     layout: WLayout,
-    last_focused: Option<(Window, Window)>,
     keyboard: WKeyboard,
     atoms: AtomCollection,
     ignore_enter: bool,
@@ -54,11 +49,6 @@ enum ShouldExit {
     No,
 }
 
-enum StackDirection {
-    Prev,
-    Next,
-}
-
 impl<'a, C: Connection> WinMan<'a, C> {
     pub fn init(
         conn: &'a C,
@@ -67,17 +57,20 @@ impl<'a, C: Connection> WinMan<'a, C> {
         atoms: AtomCollection,
     ) -> Self {
         // TODO: error handling
-        Self::become_wm(conn, screen_num).unwrap();
+        let screen = &conn.setup().roots[screen_num];
+        Self::become_wm(conn, screen).unwrap();
+        let monitors = Self::get_monitors(conn, screen).unwrap();
+        let focused_monitor = monitors.iter().position(|m| m.primary).unwrap_or(0);
 
         let mut wwm = Self {
             conn,
-            screen_num,
-            clients: Vec::with_capacity(CLIENT_CAP),
+            screen,
+            monitors,
+            focused_monitor,
             ignore_sequences: Default::default(),
             pending_exposure: Default::default(),
             drag_window: None,
             layout: WLayout::Tile,
-            last_focused: None,
             keyboard,
             atoms,
             ignore_enter: false,
@@ -88,10 +81,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
         wwm
     }
 
-    fn become_wm(conn: &'a C, screen_num: usize) -> Result<(), ReplyError> {
+    fn get_monitors(conn: &'a C, screen: &Screen) -> Result<Vec<WMonitor>, ReplyError> {
+        let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
+        let monitors: Vec<WMonitor> = monitors.monitors.iter().map(|m| m.into()).collect();
+        Ok(monitors)
+    }
+
+    fn become_wm(conn: &'a C, screen: &Screen) -> Result<(), ReplyError> {
         // set up substructure redirects for the root window.
         // NOTE: this will fail if another window manager is already running
-        let screen = &conn.setup().roots[screen_num];
         let change = ChangeWindowAttributesAux::default().event_mask(
             EventMask::SUBSTRUCTURE_REDIRECT
                 | EventMask::SUBSTRUCTURE_NOTIFY
@@ -114,8 +112,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn scan_windows(&mut self) -> Result<(), ReplyOrIdError> {
-        let screen = &self.conn.setup().roots[self.screen_num];
-        let tree_reply = self.conn.query_tree(screen.root)?.reply()?;
+        let tree_reply = self.conn.query_tree(self.screen.root)?.reply()?;
 
         let mut cookies = Vec::with_capacity(tree_reply.children.len());
         for win in tree_reply.children {
@@ -140,9 +137,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         win: Window,
         geom: &GetGeometryReply,
     ) -> Result<(), ReplyOrIdError> {
-        let screen = &self.conn.setup().roots[self.screen_num];
-        assert!(!self.window_id_in_use(win));
-
         let frame_win = self.conn.generate_id()?;
         let win_aux = CreateWindowAux::new()
             .event_mask(
@@ -159,12 +153,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     | EventMask::PROPERTY_CHANGE,
             )
             .border_pixel(theme::WINDOW_BORDER_UNFOCUSED)
-            .background_pixel(screen.black_pixel);
+            .background_pixel(self.screen.black_pixel);
 
         self.conn.create_window(
             COPY_DEPTH_FROM_PARENT,
             frame_win,
-            screen.root,
+            self.screen.root,
             geom.x,
             geom.y,
             geom.width,
@@ -184,37 +178,43 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.map_window(frame_win)?;
         self.conn.ungrab_server()?;
 
-        self.clients.push(ClientState::new(win, frame_win, geom));
+        self.focused_workspace_mut()
+            .clients
+            .push(ClientState::new(win, frame_win, geom));
 
         // remember and ignore all reparent_window events
         self.ignore_sequences
             .push(Reverse(cookie.sequence_number() as u16));
 
-        self.recompute_layout(screen)?;
+        self.recompute_layout()?;
 
         Ok(())
     }
 
-    fn window_id_in_use(&self, win: Window) -> bool {
-        self.clients
-            .iter()
-            .find(|c| c.window == win || c.frame == win)
-            .is_some()
+    fn focused_workspace_mut(&mut self) -> &mut WWorkspace {
+        let mon = &mut self.monitors[self.focused_monitor];
+        let workspace = &mut mon.workspaces[mon.focused_workspace];
+        &mut *workspace
     }
 
-    fn recompute_layout(&mut self, s: &Screen) -> Result<(), ReplyOrIdError> {
+    fn focused_workspace(&self) -> &WWorkspace {
+        let mon = &self.monitors[self.focused_monitor];
+        &mon.workspaces[mon.focused_workspace]
+    }
+
+    fn recompute_layout(&mut self) -> Result<(), ReplyOrIdError> {
+        let workspace = self.focused_workspace();
         let rects = layout_clients(
-            &Monitor {
-                x: 0,
-                y: 0,
-                width: s.width_in_pixels,
-                height: s.height_in_pixels,
-            },
-            &self.clients,
+            &self.monitors[self.focused_monitor],
+            &workspace.clients,
             &self.layout,
         );
 
-        for (state, rect) in self.clients.iter().zip(rects) {
+        if rects.is_none() {
+            return Ok(());
+        }
+
+        for (state, rect) in workspace.clients.iter().zip(rects.unwrap()) {
             let frame_aux = ConfigureWindowAux::from(rect)
                 .sibling(None)
                 .stack_mode(None);
@@ -226,23 +226,24 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn refresh(&mut self) {
         // TODO: when the bar is implemented, we want to update the bar information here
         todo!()
     }
 
     fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) -> Result<(), ReplyOrIdError> {
-        let screen = &self.conn.setup().roots[self.screen_num];
-        self.reparent_and_destroy_frame(screen, evt.window);
-        self.recompute_layout(screen)?;
+        self.reparent_and_destroy_frame(evt.window);
+        self.recompute_layout()?;
         Ok(())
     }
 
-    fn reparent_and_destroy_frame(&mut self, screen: &Screen, window: Window) {
-        let root = screen.root;
+    fn reparent_and_destroy_frame(&mut self, window: Window) {
+        let root = self.screen.root;
         let conn = self.conn;
 
-        self.clients.retain(|state| {
+        let workspace = self.focused_workspace_mut();
+        workspace.clients.retain(|state| {
             if state.window != window {
                 return true;
             }
@@ -253,6 +254,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             conn.destroy_window(state.frame).unwrap();
             false
         });
+        workspace.correct_focus();
     }
 
     fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
@@ -290,7 +292,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 return Ok(());
             }
         };
-        if let Some((focused_frame, _)) = self.last_focused {
+        let workspace = self.focused_workspace();
+        if let Some(idx) = workspace.focused_client {
+            let focused_frame = workspace.clients[idx].frame;
             if frame != focused_frame {
                 self.focus(frame, window)?;
                 self.unfocus(focused_frame)?;
@@ -313,7 +317,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.change_window_attributes(frame, &focus_aux)?;
         self.conn.flush()?;
 
-        self.last_focused = Some((frame, window));
+        self.focused_workspace_mut().set_focus_from_frame(frame);
 
         Ok(())
     }
@@ -378,31 +382,34 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.WM_PROTOCOLS,
             [self.atoms.WM_DELETE_WINDOW, 0, 0, 0, 0],
         );
-        let screen = &self.conn.setup().roots[self.screen_num];
-        self.conn.reparent_window(window, screen.root, 0, 0)?;
         self.conn
             .send_event(false, window, EventMask::NO_EVENT, event)?;
         self.conn.flush()?;
-        self.recompute_layout(screen).unwrap();
+        self.recompute_layout().unwrap();
         Ok(())
     }
 
     fn destroy_window(&mut self) -> Result<bool, ReplyOrIdError> {
-        if let Some((_, window)) = self.last_focused {
-            let screen = &self.conn.setup().roots[self.screen_num];
-            self.reparent_and_destroy_frame(screen, window);
+        let workspace = self.focused_workspace();
+        if let Some(idx) = workspace.focused_client {
+            println!("destroy window focused client index: {idx}");
+            let window = workspace.clients[idx].window;
+
             let delete_exists = self.window_property_exists(
                 window,
                 self.atoms.WM_DELETE_WINDOW,
                 self.atoms.WM_PROTOCOLS,
                 self.atoms.ATOM_ATOM,
             )?;
+
+            self.reparent_and_destroy_frame(window);
+
             if delete_exists {
                 self.send_delete_event(window)?;
             } else {
                 self.conn.kill_client(window)?;
             }
-            self.last_focused = None;
+
             return Ok(true);
         }
         Ok(false)
@@ -439,51 +446,30 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn move_adjacent(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
-        if let Some(idx) = self.currently_focused_client_index() {
-            let new_idx = self.client_idx_from_direction(idx, dir);
-            self.clients.swap(new_idx, idx);
+        let workspace = self.focused_workspace_mut();
+        if let Some(idx) = workspace.focused_client {
+            let new_idx = workspace.idx_from_direction(idx, dir);
+            workspace.swap(new_idx, idx);
+            workspace.set_focus(new_idx);
 
             // NOTE: since the cursor stays in the same spot after moving clients
             // we will generate a `EnterNotify` event since we are now hovering a new window.
             // This flag helps the enter notify handler to decide whether we want to
             // process the event.
             self.ignore_enter = true;
-            let screen = &self.conn.setup().roots[self.screen_num];
-            self.recompute_layout(screen)?;
+            self.recompute_layout()?;
         }
         Ok(())
     }
 
     fn focus_adjacent(&mut self, dir: StackDirection) {
-        if let Some(idx) = self.currently_focused_client_index() {
-            if let Some((frame, _)) = self.last_focused {
-                self.unfocus(frame).unwrap();
-            }
+        let workspace = self.focused_workspace_mut();
+        if let Some((frame, idx)) = workspace.focused_frame_and_idx() {
+            let new_idx = workspace.idx_from_direction(idx, dir);
 
-            let new_idx = self.client_idx_from_direction(idx, dir);
-            let ClientState { frame, window, .. } = self.clients[new_idx];
+            self.unfocus(frame).unwrap();
+            let ClientState { frame, window, .. } = self.focused_workspace().clients[new_idx];
             self.focus(frame, window).unwrap();
-        } else {
-            eprintln!("ERROR: could not find index of focused client");
-        }
-    }
-
-    fn client_idx_from_direction(&self, idx: usize, dir: StackDirection) -> usize {
-        match dir {
-            StackDirection::Prev => {
-                if idx == 0 {
-                    self.clients.len() - 1
-                } else {
-                    idx - 1
-                }
-            }
-            StackDirection::Next => {
-                if idx == self.clients.len() - 1 {
-                    0
-                } else {
-                    idx + 1
-                }
-            }
         }
     }
 
@@ -544,21 +530,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn currently_focused_client_index(&self) -> Option<usize> {
-        if let Some((frame, _)) = self.last_focused {
-            return self.clients.iter().position(|state| state.frame == frame);
-        }
-        None
-    }
-
     fn find_client_by_id_mut(&mut self, win: Window) -> Option<&mut ClientState> {
-        self.clients
+        self.focused_workspace_mut()
+            .clients
             .iter_mut()
             .find(|state| state.window == win || state.frame == win)
     }
 
     fn find_client_by_id(&self, win: Window) -> Option<&ClientState> {
-        self.clients
+        self.focused_workspace()
+            .clients
             .iter()
             .find(|state| state.window == win || state.frame == win)
     }

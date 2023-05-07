@@ -7,6 +7,10 @@ pub mod window {
     pub static MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
 }
 
+pub mod workspaces {
+    pub const WORKSPACE_CAP: usize = 9;
+}
+
 pub mod mouse {
     use x11rb::protocol::xproto::Button;
 

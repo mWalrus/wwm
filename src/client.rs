@@ -1,6 +1,6 @@
 use x11rb::protocol::xproto::{ConfigureWindowAux, GetGeometryReply, Window};
 
-use crate::monitor::Monitor;
+use crate::monitor::WMonitor;
 
 #[derive(Debug)]
 pub struct ClientRect {
@@ -21,8 +21,8 @@ impl From<&GetGeometryReply> for ClientRect {
     }
 }
 
-impl From<&Monitor> for ClientRect {
-    fn from(m: &Monitor) -> Self {
+impl From<&WMonitor> for ClientRect {
+    fn from(m: &WMonitor) -> Self {
         Self {
             x: m.x,
             y: m.y,

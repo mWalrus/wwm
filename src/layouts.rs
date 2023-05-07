@@ -1,28 +1,36 @@
 use crate::{
     client::{ClientRect, ClientState},
     config::window::MAIN_CLIENT_WIDTH_PERCENTAGE,
-    monitor::Monitor,
+    monitor::WMonitor,
 };
 
+#[derive(Default, Debug)]
 pub enum WLayout {
+    #[default]
     Tile,
     Column,
     Floating,
 }
 
 pub fn layout_clients(
-    mon: &Monitor,
+    mon: &WMonitor,
     clients: &Vec<ClientState>,
     layout: &WLayout,
-) -> Vec<ClientRect> {
-    match layout {
+) -> Option<Vec<ClientRect>> {
+    if clients.is_empty() {
+        return None;
+    }
+
+    let rects = match layout {
         WLayout::Tile => tile(mon, clients),
         WLayout::Column => col(mon, clients),
         _ => todo!(),
-    }
+    };
+
+    Some(rects)
 }
 
-fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
+fn tile(mon: &WMonitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     let bw = clients[0].border_width;
     if clients.len() == 1 {
         return single_client(mon, bw);
@@ -52,7 +60,7 @@ fn tile(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     rects
 }
 
-fn col(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
+fn col(mon: &WMonitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     let bw = clients[0].border_width;
     if clients.len() == 1 {
         return single_client(mon, bw);
@@ -70,7 +78,7 @@ fn col(mon: &Monitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     rects
 }
 
-fn single_client(mon: &Monitor, bw: u16) -> Vec<ClientRect> {
+fn single_client(mon: &WMonitor, bw: u16) -> Vec<ClientRect> {
     vec![ClientRect::new(
         0,
         0,

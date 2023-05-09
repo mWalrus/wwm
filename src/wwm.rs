@@ -10,6 +10,10 @@ use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashSet},
     process::{exit, Command},
+    sync::atomic::{AtomicBool, Ordering},
+    sync::Arc,
+    thread,
+    time::Duration,
 };
 use x11rb::{
     connection::Connection,
@@ -41,6 +45,7 @@ pub struct WinMan<'a, C: Connection> {
     keyboard: WKeyboard,
     atoms: AtomCollection,
     ignore_enter: bool,
+    should_exit: Arc<AtomicBool>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -74,6 +79,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             keyboard,
             atoms,
             ignore_enter: false,
+            should_exit: Arc::new(AtomicBool::new(false)),
         };
 
         // take care of potentially unmanaged windows
@@ -426,6 +432,20 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
     }
 
+    fn try_exit(&mut self) {
+        if self.should_exit.load(Ordering::Relaxed) {
+            exit(0)
+        }
+
+        let should_exit = Arc::clone(&self.should_exit);
+
+        thread::spawn(move || {
+            should_exit.store(true, Ordering::Relaxed);
+            thread::sleep(Duration::from_secs(2));
+            should_exit.store(false, Ordering::Relaxed);
+        });
+    }
+
     fn handle_key_press(&mut self, evt: KeyPressEvent) -> Result<(), ReplyOrIdError> {
         let sym = self.keyboard.key_sym(evt.detail.into());
 
@@ -449,6 +469,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     self.focus_adjacent(StackDirection::Next);
                 }
             }
+            WCommand::Exit => self.try_exit(),
             _ => {}
         }
         Ok(())

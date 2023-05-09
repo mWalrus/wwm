@@ -9,7 +9,7 @@ use crate::{
 use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashSet},
-    process::exit,
+    process::{exit, Command},
 };
 use x11rb::{
     connection::Connection,
@@ -415,6 +415,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(false)
     }
 
+    fn spawn_program(&self, cmd: &'static [&'static str]) {
+        let prog = cmd[0];
+
+        if cmd.len() > 1 {
+            let args = cmd.get(1..).unwrap();
+            Command::new(prog).args(args).spawn().unwrap();
+        } else {
+            Command::new(prog).spawn().unwrap();
+        }
+    }
+
     fn handle_key_press(&mut self, evt: KeyPressEvent) -> Result<(), ReplyOrIdError> {
         let sym = self.keyboard.key_sym(evt.detail.into());
 
@@ -431,9 +442,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WCommand::FocusDown => self.focus_adjacent(StackDirection::Next),
             WCommand::MoveUp => self.move_adjacent(StackDirection::Prev)?,
             WCommand::MoveDown => self.move_adjacent(StackDirection::Next)?,
-            WCommand::Spawn(cmd) => {
-                println!("running spawn command: {cmd:?}");
-            }
+            WCommand::Spawn(cmd) => self.spawn_program(cmd),
             WCommand::Destroy => {
                 if self.destroy_window()? {
                     self.ignore_enter = true;

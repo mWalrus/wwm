@@ -18,48 +18,15 @@ pub mod mouse {
 }
 
 pub mod commands {
-    use x11rb::protocol::xproto::{KeyButMask, ModMask};
+    use crate::keyboard::keybind::WCommand;
+    use crate::keyboard::keybind::WKeybind;
+    use x11rb::protocol::xproto::ModMask;
     use xkbcommon::xkb::keysyms as ks;
 
     pub const MOD: ModMask = ModMask::M1;
     pub const SHIFT: ModMask = ModMask::SHIFT;
 
-    type CommandSeq = &'static [&'static str];
-
-    static TERM_CMD: CommandSeq = &["alacritty"];
-
-    #[derive(Debug)]
-    pub struct WKeybind {
-        pub mods: ModMask,
-        pub keysym: u32,
-        pub action: WCommand,
-    }
-
-    impl WKeybind {
-        pub fn new(mods: ModMask, keysym: u32, action: WCommand) -> Self {
-            Self {
-                mods,
-                keysym,
-                action,
-            }
-        }
-
-        pub fn mods_as_key_but_mask(&self) -> KeyButMask {
-            KeyButMask::from(u16::from(self.mods))
-        }
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub enum WCommand {
-        Spawn(&'static [&'static str]),
-        Destroy,
-        FocusUp,
-        FocusDown,
-        MoveUp,
-        MoveDown,
-        Exit,
-        PassThrough,
-    }
+    static TERM_CMD: &[&str] = &["alacritty"];
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {

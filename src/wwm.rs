@@ -1,7 +1,7 @@
 use crate::{
     client::ClientState,
-    config::{commands::WCommand, mouse::DRAG_BUTTON, theme},
-    keyboard::WKeyboard,
+    config::{mouse::DRAG_BUTTON, theme},
+    keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::{StackDirection, WMonitor, WWorkspace},
     AtomCollection,

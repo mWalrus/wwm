@@ -26,17 +26,20 @@ pub mod commands {
     pub const MOD: ModMask = ModMask::M1;
     pub const SHIFT: ModMask = ModMask::SHIFT;
 
+    // spawn commands
     static TERM_CMD: &[&str] = &["alacritty"];
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
         vec![
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveUp),
-            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveDown),
+            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClientPrev),
+            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClientNext),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
-            WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusDown),
-            WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusUp),
+            WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusClientNext),
+            WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusClientPrev),
+            WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitorPrev),
+            WKeybind::new(MOD,         ks::KEY_l,      WCommand::FocusMonitorNext),
             WKeybind::new(MOD,         ks::KEY_q,      WCommand::Exit),
         ]
     }

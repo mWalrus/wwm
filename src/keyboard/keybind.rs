@@ -25,10 +25,12 @@ impl WKeybind {
 pub enum WCommand {
     Destroy,
     Exit,
-    FocusDown,
-    FocusUp,
-    MoveDown,
-    MoveUp,
-    PassThrough,
+    FocusClientNext,
+    FocusClientPrev,
+    MoveClientNext,
+    MoveClientPrev,
+    FocusMonitorNext,
+    FocusMonitorPrev,
+    Idle,
     Spawn(&'static [&'static str]),
 }

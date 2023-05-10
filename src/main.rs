@@ -3,6 +3,7 @@ mod config;
 mod keyboard;
 mod layouts;
 mod monitor;
+mod util;
 mod wwm;
 
 use keyboard::WKeyboard;

@@ -15,6 +15,7 @@ pub struct WMonitor {
 
 impl From<&MonitorInfo> for WMonitor {
     fn from(mi: &MonitorInfo) -> Self {
+        println!("Monitor: {mi:?}");
         let mut workspaces = Vec::with_capacity(WORKSPACE_CAP);
         for _ in 0..WORKSPACE_CAP {
             workspaces.push(WWorkspace::default());
@@ -108,8 +109,6 @@ impl WWorkspace {
         } else if !self.clients.is_empty() {
             // focus the first client if focused client is not set
             self.focused_client = Some(0);
-        } else {
-            self.focused_client = None;
         }
     }
 
@@ -118,11 +117,7 @@ impl WWorkspace {
             println!("focused client index: {idx}");
             println!("client count: {}", self.clients.len());
             self.clients.remove(idx);
-            if self.clients.is_empty() {
-                self.focused_client = None;
-            } else if idx >= self.clients.len() {
-                self.focused_client = Some(self.clients.len().saturating_sub(1));
-            }
+            self.correct_focus();
             println!("new focused client index: {:?}", self.focused_client);
         }
     }

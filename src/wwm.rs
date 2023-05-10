@@ -449,7 +449,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn handle_key_press(&mut self, evt: KeyPressEvent) -> Result<(), ReplyOrIdError> {
         let sym = self.keyboard.key_sym(evt.detail.into());
 
-        let mut action = WCommand::PassThrough;
+        let mut action = WCommand::Idle;
         for bind in &self.keyboard.keybinds {
             if bind.keysym == sym && evt.state == bind.mods_as_key_but_mask() {
                 action = bind.action;
@@ -458,10 +458,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         match action {
-            WCommand::FocusUp => self.focus_adjacent(StackDirection::Prev),
-            WCommand::FocusDown => self.focus_adjacent(StackDirection::Next),
-            WCommand::MoveUp => self.move_adjacent(StackDirection::Prev)?,
-            WCommand::MoveDown => self.move_adjacent(StackDirection::Next)?,
+            WCommand::FocusClientPrev => self.focus_adjacent(StackDirection::Prev),
+            WCommand::FocusClientNext => self.focus_adjacent(StackDirection::Next),
+            WCommand::MoveClientPrev => self.move_adjacent(StackDirection::Prev)?,
+            WCommand::MoveClientNext => self.move_adjacent(StackDirection::Next)?,
+            // WCommand::FocusMonitorNext => self.focus_adjacent_monitor(StackDirection::Next),
+            // WCommand::FocusMonitorPrev => self.focus_adjacent_monitor(StackDirection::Prev),
             WCommand::Spawn(cmd) => self.spawn_program(cmd),
             WCommand::Destroy => {
                 if self.destroy_window()? {
@@ -470,7 +472,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 }
             }
             WCommand::Exit => self.try_exit(),
-            _ => {}
+            WCommand::Idle | _ => {}
         }
         Ok(())
     }

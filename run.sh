@@ -1,11 +1,7 @@
 #! /usr/bin/env bash
 DISPLAY=":1"
 
-xeyes &
-xeyes &
-# xeyes &
-# xeyes &
-# xeyes &
-# xeyes &
-# xeyes &
-cargo run --release
+cargo build --release
+
+xinit ./xinitrc -- /sbin/Xorg :1
+

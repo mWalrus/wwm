@@ -39,8 +39,8 @@ fn tile(mon: &WMonitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     let main_width = mon.width_from_percentage(MAIN_CLIENT_WIDTH_PERCENTAGE);
 
     let mut rects = vec![ClientRect::new(
-        0,
-        0,
+        mon.x,
+        mon.y,
         main_width - bw * 2,
         mon.height - bw * 2,
     )];
@@ -50,8 +50,8 @@ fn tile(mon: &WMonitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
 
     for i in 0..non_main_window_count {
         rects.push(ClientRect::new(
-            main_width as i16,
-            (i as u16 * stack_client_height) as i16,
+            mon.x + main_width as i16,
+            mon.y + (i as u16 * stack_client_height) as i16,
             mon.width - main_width - (bw * 2),
             stack_client_height - (bw * 2),
         ));
@@ -69,8 +69,8 @@ fn col(mon: &WMonitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
     let client_width = mon.width / clients.len() as u16;
     for i in 0..clients.len() {
         rects.push(ClientRect::new(
-            i as i16 * client_width as i16,
-            0,
+            mon.x + (i as i16 * client_width as i16),
+            mon.y,
             mon.width - client_width - (bw * 2),
             mon.height - (bw * 2),
         ));
@@ -80,8 +80,8 @@ fn col(mon: &WMonitor, clients: &Vec<ClientState>) -> Vec<ClientRect> {
 
 fn single_client(mon: &WMonitor, bw: u16) -> Vec<ClientRect> {
     vec![ClientRect::new(
-        0,
-        0,
+        mon.x,
+        mon.y,
         mon.width - bw * 2,
         mon.height - bw * 2,
     )]

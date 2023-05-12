@@ -20,6 +20,7 @@ use std::{
 };
 use x11rb::{
     connection::Connection,
+    cursor::Handle as CursorHandle,
     protocol::{
         randr::ConnectionExt as _,
         xkb::StateNotifyEvent,
@@ -32,6 +33,7 @@ use x11rb::{
         },
         ErrorKind, Event,
     },
+    resource_manager::new_from_default,
     rust_connection::{ReplyError, ReplyOrIdError},
     COPY_DEPTH_FROM_PARENT, CURRENT_TIME,
 };
@@ -68,7 +70,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     ) -> Self {
         // TODO: error handling
         let screen = &conn.setup().roots[screen_num];
-        Self::become_wm(conn, screen).unwrap();
+        Self::become_wm(conn, screen_num, screen).unwrap();
         let monitors = Self::get_monitors(conn, screen).unwrap();
 
         let mut monitors: WVec<WMonitor> = monitors.into();
@@ -109,16 +111,22 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(monitors)
     }
 
-    fn become_wm(conn: &'a C, screen: &Screen) -> Result<(), ReplyError> {
+    fn become_wm(conn: &'a C, screen_num: usize, screen: &Screen) -> Result<(), ReplyError> {
         // set up substructure redirects for the root window.
         // NOTE: this will fail if another window manager is already running
-        let change = ChangeWindowAttributesAux::default().event_mask(
-            EventMask::SUBSTRUCTURE_REDIRECT
-                | EventMask::SUBSTRUCTURE_NOTIFY
-                | EventMask::BUTTON_PRESS
-                | EventMask::STRUCTURE_NOTIFY
-                | EventMask::PROPERTY_CHANGE,
-        );
+        let resource_db = new_from_default(conn)?;
+        let cursor_handle = CursorHandle::new(conn, screen_num, &resource_db)?;
+        let cursor_handle = cursor_handle.reply().unwrap();
+
+        let change = ChangeWindowAttributesAux::default()
+            .event_mask(
+                EventMask::SUBSTRUCTURE_REDIRECT
+                    | EventMask::SUBSTRUCTURE_NOTIFY
+                    | EventMask::BUTTON_PRESS
+                    | EventMask::STRUCTURE_NOTIFY
+                    | EventMask::PROPERTY_CHANGE,
+            )
+            .cursor(cursor_handle.load_cursor(conn, "left_ptr").unwrap());
         let res = conn
             .change_window_attributes(screen.root, &change)
             .unwrap()

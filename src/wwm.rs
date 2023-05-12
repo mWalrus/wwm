@@ -35,7 +35,7 @@ use x11rb::{
     },
     resource_manager::new_from_default,
     rust_connection::{ReplyError, ReplyOrIdError},
-    COPY_DEPTH_FROM_PARENT, CURRENT_TIME,
+    COPY_DEPTH_FROM_PARENT, CURRENT_TIME, NONE,
 };
 
 pub struct WinMan<'a, C: Connection> {
@@ -215,13 +215,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .borrow_mut()
             .push_client(WClientState::new(win, frame_win, geom));
 
-        self.focus_selected()?;
-
         // remember and ignore all reparent_window events
         self.ignore_sequences
             .push(Reverse(cookie.sequence_number() as u16));
 
         self.recompute_layout()?;
+
+        self.focus_selected()?;
+        self.warp_pointer_to_focused_client()?;
 
         Ok(())
     }
@@ -239,7 +240,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 .sibling(None)
                 .stack_mode(None);
             let client_aux = frame_aux.clone().x(0).y(0);
-            let c = client.borrow();
+
+            let mut c = client.borrow_mut();
+            c.rect = rect;
+
             self.conn.configure_window(c.window, &client_aux)?;
             self.conn.configure_window(c.frame, &frame_aux)?;
         }
@@ -358,6 +362,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn focus_selected(&mut self) -> Result<(), ReplyError> {
         let ws = self.focused_workspace.borrow();
         self.focused_client = ws.focused_client();
+
         let (frame, win) = {
             if let Some(client) = &self.focused_client {
                 let c = client.borrow();
@@ -366,6 +371,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 return Ok(());
             }
         };
+
         self.conn
             .set_input_focus(InputFocus::POINTER_ROOT, win, CURRENT_TIME)?;
         self.conn.configure_window(
@@ -375,6 +381,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let focus_aux = ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_FOCUSED);
         self.conn.change_window_attributes(frame, &focus_aux)?;
+
+        self.ignore_enter = true;
+
         self.conn.flush()?;
 
         Ok(())
@@ -475,8 +484,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.kill_client(window)?;
         }
 
-        self.focus_selected()?;
         self.recompute_layout()?;
+
+        self.focus_selected()?;
+        self.warp_pointer_to_focused_client()?;
 
         return Ok(true);
     }
@@ -536,6 +547,25 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
+    fn warp_pointer_to_focused_client(&self) -> Result<(), ReplyOrIdError> {
+        if let Some(client) = &self.focused_client {
+            let c = client.borrow();
+            println!("warping pointer to {} @ rect: {:#?}", c.window, c.rect);
+            self.conn.warp_pointer(
+                NONE,
+                c.frame,
+                0,
+                0,
+                0,
+                0,
+                c.rect.width as i16 / 2,
+                c.rect.height as i16 / 2,
+            )?;
+            self.conn.flush()?;
+        }
+        Ok(())
+    }
+
     fn move_adjacent(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
         {
             let mut ws = self.focused_workspace.borrow_mut();
@@ -548,6 +578,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.recompute_layout()?;
         }
         self.focused_client = focused_client;
+        self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
@@ -557,6 +588,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.focused_workspace.borrow_mut().focus_neighbor(dir);
         }
         self.focus_selected().unwrap();
+        self.warp_pointer_to_focused_client().unwrap();
     }
 
     fn handle_xkb_state_notify(&mut self, evt: StateNotifyEvent) -> Result<(), ReplyOrIdError> {
@@ -632,11 +664,32 @@ impl<'a, C: Connection> WinMan<'a, C> {
         );
 
         let mon = self.monitors.selected().unwrap();
+
         self.focused_workspace = mon.borrow().focused_workspace();
         self.focused_client = self.focused_workspace.borrow().focused_client();
         self.focused_monitor = mon;
 
+        self.warp_pointer_to_focused_monitor().unwrap();
+
         self.focus_selected()?;
+
+        self.warp_pointer_to_focused_client().unwrap();
+        Ok(())
+    }
+
+    fn warp_pointer_to_focused_monitor(&self) -> Result<(), ReplyOrIdError> {
+        let m = self.focused_monitor.borrow();
+        self.conn.warp_pointer(
+            NONE,
+            self.screen.root,
+            0,
+            0,
+            0,
+            0,
+            m.x + (m.width as i16 / 2),
+            m.y + (m.height as i16 / 2),
+        )?;
+        self.conn.flush()?;
         Ok(())
     }
 }

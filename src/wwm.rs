@@ -1,15 +1,18 @@
 use crate::{
-    client::ClientState,
+    client::WClientState,
     config::{mouse::DRAG_BUTTON, theme},
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::{StackDirection, WMonitor, WWorkspace},
+    util::WVec,
     AtomCollection,
 };
 use std::{
+    cell::RefCell,
     cmp::Reverse,
     collections::{BinaryHeap, HashSet},
     process::{exit, Command},
+    rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
     thread,
@@ -36,8 +39,10 @@ use x11rb::{
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
-    monitors: Vec<WMonitor>,
-    focused_monitor: usize,
+    monitors: WVec<WMonitor>,
+    focused_monitor: Rc<RefCell<WMonitor>>,
+    focused_workspace: Rc<RefCell<WWorkspace>>,
+    focused_client: Option<Rc<RefCell<WClientState>>>,
     ignore_sequences: BinaryHeap<Reverse<u16>>,
     pending_exposure: HashSet<Window>,
     drag_window: Option<(Window, (i16, i16))>,
@@ -65,13 +70,24 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let screen = &conn.setup().roots[screen_num];
         Self::become_wm(conn, screen).unwrap();
         let monitors = Self::get_monitors(conn, screen).unwrap();
-        let focused_monitor = monitors.iter().position(|m| m.primary).unwrap_or(0);
+
+        let mut monitors: WVec<WMonitor> = monitors.into();
+        monitors.find_and_select(|m| m.borrow().primary);
+        let focused_monitor = monitors.selected().unwrap();
+
+        let focused_workspace = {
+            let mon = focused_monitor.borrow();
+            let ws = mon.workspaces.selected().unwrap();
+            ws
+        };
 
         let mut wwm = Self {
             conn,
             screen,
             monitors,
             focused_monitor,
+            focused_workspace,
+            focused_client: None, // we havent scanned windows yet so it's always None here
             ignore_sequences: Default::default(),
             pending_exposure: Default::default(),
             drag_window: None,
@@ -143,6 +159,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         win: Window,
         geom: &GetGeometryReply,
     ) -> Result<(), ReplyOrIdError> {
+        println!("managing new window");
         let frame_win = self.conn.generate_id()?;
         let win_aux = CreateWindowAux::new()
             .event_mask(
@@ -184,9 +201,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.map_window(frame_win)?;
         self.conn.ungrab_server()?;
 
-        self.focused_workspace_mut()
-            .clients
-            .push(ClientState::new(win, frame_win, geom));
+        self.unfocus_focused_client()?;
+
+        self.focused_workspace
+            .borrow_mut()
+            .push_client(WClientState::new(win, frame_win, geom));
+
+        self.focus_selected()?;
 
         // remember and ignore all reparent_window events
         self.ignore_sequences
@@ -197,36 +218,22 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn focused_workspace_mut(&mut self) -> &mut WWorkspace {
-        let mon = &mut self.monitors[self.focused_monitor];
-        let workspace = &mut mon.workspaces[mon.focused_workspace];
-        &mut *workspace
-    }
-
-    fn focused_workspace(&self) -> &WWorkspace {
-        let mon = &self.monitors[self.focused_monitor];
-        &mon.workspaces[mon.focused_workspace]
-    }
-
     fn recompute_layout(&mut self) -> Result<(), ReplyOrIdError> {
-        let workspace = self.focused_workspace();
-        let rects = layout_clients(
-            &self.monitors[self.focused_monitor],
-            &workspace.clients,
-            &self.layout,
-        );
+        let ws = self.focused_workspace.borrow();
+        let rects = layout_clients(&self.layout, &self.focused_monitor.borrow(), &ws.clients);
 
         if rects.is_none() {
             return Ok(());
         }
 
-        for (state, rect) in workspace.clients.iter().zip(rects.unwrap()) {
+        for (client, rect) in ws.clients.inner().iter().zip(rects.unwrap()) {
             let frame_aux = ConfigureWindowAux::from(rect)
                 .sibling(None)
                 .stack_mode(None);
             let client_aux = frame_aux.clone().x(0).y(0);
-            self.conn.configure_window(state.window, &client_aux)?;
-            self.conn.configure_window(state.frame, &frame_aux)?;
+            let c = client.borrow();
+            self.conn.configure_window(c.window, &client_aux)?;
+            self.conn.configure_window(c.frame, &frame_aux)?;
         }
         self.conn.flush()?;
         Ok(())
@@ -248,27 +255,22 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let root = self.screen.root;
         let conn = self.conn;
 
-        let workspace = self.focused_workspace_mut();
-        workspace.clients.retain(|state| {
-            if state.window != window {
+        let mut ws = self.focused_workspace.borrow_mut();
+        ws.clients.retain(|client| {
+            let c = client.borrow();
+            if c.window != window {
                 return true;
             }
 
-            conn.change_save_set(SetMode::DELETE, state.window).unwrap();
-            conn.reparent_window(state.window, root, state.rect.x, state.rect.y)
+            conn.change_save_set(SetMode::DELETE, c.window).unwrap();
+            conn.reparent_window(c.window, root, c.rect.x, c.rect.y)
                 .unwrap();
-            conn.destroy_window(state.frame).unwrap();
+            conn.destroy_window(c.frame).unwrap();
             false
         });
-        workspace.correct_focus();
     }
 
     fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
-        if let Some(state) = self.find_client_by_id_mut(evt.window) {
-            let _ = state;
-            unimplemented!();
-        }
-
         let aux = ConfigureWindowAux::from_configure_request(&evt)
             .sibling(None)
             .stack_mode(None);
@@ -284,6 +286,27 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.pending_exposure.insert(evt.window);
     }
 
+    fn entered_adjacent_monitor(&mut self, win: Window) {
+        self.monitors.find_and_select(|m| {
+            let mut m = m.borrow_mut();
+            let idx = m.workspaces.position(|ws| ws.borrow().has_client(win));
+            if idx.is_none() {
+                return false;
+            }
+
+            m.workspaces.select(idx.unwrap()).unwrap();
+
+            let ws = m.workspaces.selected().unwrap();
+            ws.borrow_mut().clients.find_and_select(|c| {
+                let c = c.borrow();
+                c.frame == win || c.window == win
+            });
+            true
+        });
+        self.focused_monitor = self.monitors.selected().unwrap();
+        self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
+    }
+
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyError> {
         // FIXME: maybe there's a better way?
         if self.ignore_enter {
@@ -291,29 +314,52 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
+        let entered_win = evt.event;
+
         let (frame, window) = {
-            if let Some(state) = self.find_client_by_id(evt.event) {
-                (state.frame, state.window)
+            if let Some(client) = &self.focused_client {
+                let c = client.borrow();
+                (c.frame, c.window)
             } else {
                 return Ok(());
             }
         };
-        let workspace = self.focused_workspace();
-        if let Some(idx) = workspace.focused_client {
-            let focused_frame = workspace.clients[idx].frame;
-            if frame != focused_frame {
-                self.focus(frame, window)?;
-                self.unfocus(focused_frame)?;
-            }
-        } else {
-            self.focus(frame, window)?;
+
+        if frame == entered_win || window == entered_win {
+            return Ok(());
         }
+        self.unfocus_focused_client()?;
+
+        {
+            let in_workspace = self.focused_workspace.borrow().has_client(entered_win);
+            if !in_workspace {
+                self.entered_adjacent_monitor(entered_win);
+            }
+
+            let mut ws = self.focused_workspace.borrow_mut();
+            ws.clients.find_and_select(|c| {
+                let c = c.borrow();
+                c.frame == entered_win || c.window == entered_win
+            });
+        }
+
+        self.focus_selected()?;
         Ok(())
     }
 
-    fn focus(&mut self, frame: Window, window: Window) -> Result<(), ReplyError> {
+    fn focus_selected(&mut self) -> Result<(), ReplyError> {
+        let ws = self.focused_workspace.borrow();
+        self.focused_client = ws.focused_client();
+        let (frame, win) = {
+            if let Some(client) = &self.focused_client {
+                let c = client.borrow();
+                (c.frame, c.window)
+            } else {
+                return Ok(());
+            }
+        };
         self.conn
-            .set_input_focus(InputFocus::POINTER_ROOT, window, CURRENT_TIME)?;
+            .set_input_focus(InputFocus::POINTER_ROOT, win, CURRENT_TIME)?;
         self.conn.configure_window(
             frame,
             &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
@@ -323,16 +369,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.change_window_attributes(frame, &focus_aux)?;
         self.conn.flush()?;
 
-        self.focused_workspace_mut().set_focus_from_frame(frame);
-
         Ok(())
     }
 
-    fn unfocus(&mut self, frame: Window) -> Result<(), ReplyError> {
-        let unfocus_aux =
-            ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_UNFOCUSED);
-        self.conn.change_window_attributes(frame, &unfocus_aux)?;
-        self.conn.flush()?;
+    fn unfocus_focused_client(&mut self) -> Result<(), ReplyError> {
+        if let Some(client) = &self.focused_client {
+            let frame = client.borrow().frame;
+            let unfocus_aux =
+                ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_UNFOCUSED);
+            self.conn.change_window_attributes(frame, &unfocus_aux)?;
+            self.conn.flush()?;
+            self.focused_client = None;
+        }
         Ok(())
     }
 
@@ -340,10 +388,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if evt.detail != DRAG_BUTTON || u16::from(evt.state) != 0 {
             return;
         }
-        if let Some(state) = self.find_client_by_id(evt.event) {
-            if self.drag_window.is_none() && evt.event_x < 0.max(state.rect.width as i16) {
+        let ws = self.focused_workspace.borrow();
+        if let Some(client) = ws.find_client_by_win(evt.event) {
+            let c = client.borrow();
+            if self.drag_window.is_none() && evt.event_x < 0.max(c.rect.width as i16) {
                 let (x, y) = (-evt.event_x, -evt.event_y);
-                self.drag_window = Some((state.frame, (x, y)));
+                self.drag_window = Some((c.frame, (x, y)));
             }
         }
     }
@@ -391,34 +441,36 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn
             .send_event(false, window, EventMask::NO_EVENT, event)?;
         self.conn.flush()?;
-        self.recompute_layout().unwrap();
         Ok(())
     }
 
     fn destroy_window(&mut self) -> Result<bool, ReplyOrIdError> {
-        let workspace = self.focused_workspace();
-        if let Some(idx) = workspace.focused_client {
-            println!("destroy window focused client index: {idx}");
-            let window = workspace.clients[idx].window;
-
-            let delete_exists = self.window_property_exists(
-                window,
-                self.atoms.WM_DELETE_WINDOW,
-                self.atoms.WM_PROTOCOLS,
-                self.atoms.ATOM_ATOM,
-            )?;
-
-            self.reparent_and_destroy_frame(window);
-
-            if delete_exists {
-                self.send_delete_event(window)?;
+        let window = {
+            if let Some(client) = &self.focused_client {
+                client.borrow().window
             } else {
-                self.conn.kill_client(window)?;
+                return Ok(false);
             }
+        };
+        let delete_exists = self.window_property_exists(
+            window,
+            self.atoms.WM_DELETE_WINDOW,
+            self.atoms.WM_PROTOCOLS,
+            self.atoms.ATOM_ATOM,
+        )?;
 
-            return Ok(true);
+        self.reparent_and_destroy_frame(window);
+
+        if delete_exists {
+            self.send_delete_event(window)?;
+        } else {
+            self.conn.kill_client(window)?;
         }
-        Ok(false)
+
+        self.focus_selected()?;
+        self.recompute_layout()?;
+
+        return Ok(true);
     }
 
     fn spawn_program(&self, cmd: &'static [&'static str]) {
@@ -462,47 +514,41 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WCommand::FocusClientNext => self.focus_adjacent(StackDirection::Next),
             WCommand::MoveClientPrev => self.move_adjacent(StackDirection::Prev)?,
             WCommand::MoveClientNext => self.move_adjacent(StackDirection::Next)?,
-            // WCommand::FocusMonitorNext => self.focus_adjacent_monitor(StackDirection::Next),
-            // WCommand::FocusMonitorPrev => self.focus_adjacent_monitor(StackDirection::Prev),
+            WCommand::FocusMonitorNext => self.focus_adjacent_monitor(StackDirection::Next)?,
+            WCommand::FocusMonitorPrev => self.focus_adjacent_monitor(StackDirection::Prev)?,
             WCommand::Spawn(cmd) => self.spawn_program(cmd),
             WCommand::Destroy => {
                 if self.destroy_window()? {
                     self.ignore_enter = true;
-                    self.focus_adjacent(StackDirection::Next);
                 }
             }
             WCommand::Exit => self.try_exit(),
-            WCommand::Idle | _ => {}
+            WCommand::Idle => {}
         }
         Ok(())
     }
 
     fn move_adjacent(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
-        let workspace = self.focused_workspace_mut();
-        if let Some(idx) = workspace.focused_client {
-            let new_idx = workspace.idx_from_direction(idx, dir);
-            workspace.swap(new_idx, idx);
-            workspace.set_focus(new_idx);
+        {
+            let mut ws = self.focused_workspace.borrow_mut();
+            ws.swap_with_neighbor(dir);
+        }
 
-            // NOTE: since the cursor stays in the same spot after moving clients
-            // we will generate a `EnterNotify` event since we are now hovering a new window.
-            // This flag helps the enter notify handler to decide whether we want to
-            // process the event.
+        let focused_client = self.focused_workspace.borrow().focused_client();
+        if focused_client.is_some() {
             self.ignore_enter = true;
             self.recompute_layout()?;
         }
+        self.focused_client = focused_client;
         Ok(())
     }
 
     fn focus_adjacent(&mut self, dir: StackDirection) {
-        let workspace = self.focused_workspace_mut();
-        if let Some((frame, idx)) = workspace.focused_frame_and_idx() {
-            let new_idx = workspace.idx_from_direction(idx, dir);
-
-            self.unfocus(frame).unwrap();
-            let ClientState { frame, window, .. } = self.focused_workspace().clients[new_idx];
-            self.focus(frame, window).unwrap();
+        self.unfocus_focused_client().unwrap();
+        {
+            self.focused_workspace.borrow_mut().focus_neighbor(dir);
         }
+        self.focus_selected().unwrap();
     }
 
     fn handle_xkb_state_notify(&mut self, evt: StateNotifyEvent) -> Result<(), ReplyOrIdError> {
@@ -562,17 +608,27 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn find_client_by_id_mut(&mut self, win: Window) -> Option<&mut ClientState> {
-        self.focused_workspace_mut()
-            .clients
-            .iter_mut()
-            .find(|state| state.window == win || state.frame == win)
-    }
+    fn focus_adjacent_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyError> {
+        self.unfocus_focused_client()?;
 
-    fn find_client_by_id(&self, win: Window) -> Option<&ClientState> {
-        self.focused_workspace()
-            .clients
-            .iter()
-            .find(|state| state.window == win || state.frame == win)
+        match dir {
+            StackDirection::Prev => self.monitors.prev_index(true, true),
+            StackDirection::Next => self.monitors.next_index(true, true),
+        };
+
+        let tmp = self.monitors.inner();
+        println!(
+            "focusing monitor {} of {} possible",
+            self.monitors.index() + 1,
+            tmp.len()
+        );
+
+        let mon = self.monitors.selected().unwrap();
+        self.focused_workspace = mon.borrow().focused_workspace();
+        self.focused_client = self.focused_workspace.borrow().focused_client();
+        self.focused_monitor = mon;
+
+        self.focus_selected()?;
+        Ok(())
     }
 }

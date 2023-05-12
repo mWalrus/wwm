@@ -2,7 +2,7 @@ use x11rb::protocol::xproto::{ConfigureWindowAux, GetGeometryReply, Window};
 
 use crate::monitor::WMonitor;
 
-#[derive(Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct ClientRect {
     pub x: i16,
     pub y: i16,
@@ -53,8 +53,8 @@ impl ClientRect {
     }
 }
 
-#[derive(Debug)]
-pub struct ClientState {
+#[derive(Default, Debug, Clone, Copy)]
+pub struct WClientState {
     pub window: Window,
     pub frame: Window,
     pub rect: ClientRect,
@@ -62,7 +62,7 @@ pub struct ClientState {
     pub has_focus: bool,
 }
 
-impl ClientState {
+impl WClientState {
     pub fn new(window: Window, frame: Window, geom: &GetGeometryReply) -> Self {
         Self {
             window,

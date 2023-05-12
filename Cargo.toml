@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 smallmap = "1.4.1"
+thiserror = "1.0.40"
 x11rb = { version = "0.11.1", features = ["xkb", "randr", "allow-unsafe-code", "cursor", "libc"] }
 xcb = "1.2.1"
 xkbcommon = { version = "0.5.0", features = ["x11"] }

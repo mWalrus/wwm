@@ -483,6 +483,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         } else {
             self.conn.kill_client(window)?;
         }
+        self.conn.flush()?;
 
         self.recompute_layout()?;
 

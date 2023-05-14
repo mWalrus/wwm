@@ -211,3 +211,16 @@ impl<T: Default> WVec<T> {
         self.inner.is_empty()
     }
 }
+
+pub fn cmd_bits(cmd: &'static [&'static str]) -> Option<(&'static str, &'static [&'static str])> {
+    if cmd.is_empty() {
+        return None;
+    }
+
+    if cmd.len() == 1 {
+        return Some((cmd[0], &[]));
+    }
+
+    let (cmd, args) = cmd.split_at(1);
+    Some((cmd[0], args))
+}

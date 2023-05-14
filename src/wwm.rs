@@ -1,10 +1,11 @@
 use crate::{
     client::WClientState,
-    config::{mouse::DRAG_BUTTON, theme},
+    config::{auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme},
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
-    monitor::{StackDirection, WMonitor, WWorkspace},
-    util::WVec,
+    monitor::WMonitor,
+    util::{self, WVec},
+    workspace::{StackDirection, WWorkspace},
     AtomCollection,
 };
 use std::{
@@ -70,7 +71,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
     ) -> Self {
         // TODO: error handling
         let screen = &conn.setup().roots[screen_num];
+
         Self::become_wm(conn, screen_num, screen).unwrap();
+        Self::run_auto_start_commands().unwrap();
+
         let monitors = Self::get_monitors(conn, screen).unwrap();
 
         let mut monitors: WVec<WMonitor> = monitors.into();
@@ -103,6 +107,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
         // take care of potentially unmanaged windows
         wwm.scan_windows().unwrap();
         wwm
+    }
+
+    fn run_auto_start_commands() -> Result<(), std::io::Error> {
+        for cmd in AUTO_START_COMMANDS {
+            if let Some((bin, args)) = util::cmd_bits(cmd) {
+                Command::new(bin).args(args).spawn()?;
+            }
+        }
+        Ok(())
     }
 
     fn get_monitors(conn: &'a C, screen: &Screen) -> Result<Vec<WMonitor>, ReplyError> {
@@ -494,13 +507,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn spawn_program(&self, cmd: &'static [&'static str]) {
-        let prog = cmd[0];
-
-        if cmd.len() > 1 {
-            let args = cmd.get(1..).unwrap();
-            Command::new(prog).args(args).spawn().unwrap();
-        } else {
-            Command::new(prog).spawn().unwrap();
+        if let Some((bin, args)) = util::cmd_bits(cmd) {
+            Command::new(bin).args(args).spawn().unwrap();
         }
     }
 

@@ -44,3 +44,10 @@ pub mod commands {
         ]
     }
 }
+
+pub mod auto_start {
+    #[rustfmt::skip]
+    pub static AUTO_START_COMMANDS: &[&[&str]] = &[
+        &["feh", "--bg-scale", "/usr/share/dwm/wallpaper.png"]
+    ];
+}

@@ -4,6 +4,7 @@ mod keyboard;
 mod layouts;
 mod monitor;
 mod util;
+mod workspace;
 mod wwm;
 
 use keyboard::WKeyboard;

@@ -28,11 +28,15 @@ pub mod commands {
 
     // spawn commands
     static TERM_CMD: &[&str] = &["alacritty"];
+    static CHATTERINO_CMD: &[&str] = &["chatterino"];
+    static XEYES_CMD: &[&str] = &["xeyes"];
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
         vec![
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
+            WKeybind::new(MOD,         ks::KEY_c,      WCommand::Spawn(CHATTERINO_CMD)),
+            WKeybind::new(MOD,         ks::KEY_x,      WCommand::Spawn(XEYES_CMD)),
             WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClientPrev),
             WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClientNext),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),

@@ -4,7 +4,6 @@ xrandr --output HDMI-0 --mode 1920x1080 --left-of DP-0 --output DP-0 --primary -
 
 xeyes &
 xeyes &
-sleep 2 && xterm &
 # xeyes &
 # xeyes &
 # xeyes &

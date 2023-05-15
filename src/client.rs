@@ -59,17 +59,17 @@ pub struct WClientState {
     pub frame: Window,
     pub rect: ClientRect,
     pub border_width: u16,
-    pub has_focus: bool,
+    pub is_floating: bool,
 }
 
 impl WClientState {
-    pub fn new(window: Window, frame: Window, geom: &GetGeometryReply) -> Self {
+    pub fn new(window: Window, frame: Window, geom: &GetGeometryReply, is_floating: bool) -> Self {
         Self {
             window,
             frame,
             rect: geom.into(),
             border_width: 1,
-            has_focus: false,
+            is_floating,
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::{
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
-    util::{self, WVec},
+    util::{self, ClientCell, WVec},
     workspace::{StackDirection, WWorkspace},
     AtomCollection,
 };
@@ -28,16 +28,24 @@ use x11rb::{
         xproto::{
             ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
             ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, CreateWindowAux,
-            EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, InputFocus, KeyPressEvent,
-            MapRequestEvent, MapState, MotionNotifyEvent, PropMode, Screen, SetMode, StackMode,
-            UnmapNotifyEvent, Window, WindowClass,
+            DestroyNotifyEvent, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
+            InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent, PropMode,
+            Screen, SetMode, StackMode, UnmapNotifyEvent, Window, WindowClass,
         },
         ErrorKind, Event,
     },
     resource_manager::new_from_default,
     rust_connection::{ReplyError, ReplyOrIdError},
+    wrapper::ConnectionExt as _,
     COPY_DEPTH_FROM_PARENT, CURRENT_TIME, NONE,
 };
+
+#[repr(u8)]
+enum WindowState {
+    Withdrawn,
+    Normal,
+    Iconic,
+}
 
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
@@ -103,6 +111,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             ignore_enter: false,
             should_exit: Arc::new(AtomicBool::new(false)),
         };
+        wwm.warp_pointer_to_focused_monitor().unwrap();
 
         // take care of potentially unmanaged windows
         wwm.scan_windows().unwrap();
@@ -186,13 +195,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .event_mask(
                 EventMask::EXPOSURE
                     | EventMask::SUBSTRUCTURE_NOTIFY
-                    | EventMask::BUTTON_PRESS
-                    | EventMask::BUTTON_RELEASE
-                    | EventMask::KEY_PRESS
-                    | EventMask::KEY_RELEASE
-                    | EventMask::POINTER_MOTION
                     | EventMask::ENTER_WINDOW
                     | EventMask::LEAVE_WINDOW
+                    | EventMask::FOCUS_CHANGE
                     | EventMask::STRUCTURE_NOTIFY
                     | EventMask::PROPERTY_CHANGE,
             )
@@ -208,17 +213,36 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         println!("{win} floating?: {is_floating}");
 
-        let (mon_x, mon_y) = {
+        let (mx, my, mw, mh) = {
             let m = self.focused_monitor.borrow();
-            (m.x, m.y)
+            (m.x, m.y, m.width, m.height)
         };
+
+        let mut x = geom.x;
+        let mut y = geom.y;
+
+        if geom.x + geom.width as i16 > mx + mw as i16 {
+            x = mx + mw as i16 - geom.width as i16 - 2 // borders
+        }
+        if geom.y + geom.height as i16 > my + mh as i16 {
+            y = my + mh as i16 + geom.height as i16 - 2 // borders
+        }
+
+        x = x.max(mx);
+        y = y.max(my);
+
+        println!("currently selected monitor: {}, {}, {}, {}", mx, my, mw, mh);
+        println!(
+            "creating frame with dims: x -> {}, y -> {}, w -> {}, h -> {}",
+            x, y, geom.width, geom.height
+        );
 
         self.conn.create_window(
             COPY_DEPTH_FROM_PARENT,
             frame_win,
             self.screen.root,
-            mon_x + geom.x,
-            mon_y + geom.y,
+            x,
+            y,
             geom.width,
             geom.height,
             1,
@@ -227,22 +251,25 @@ impl<'a, C: Connection> WinMan<'a, C> {
             &frame_aux,
         )?;
 
+        self.focused_workspace
+            .borrow_mut()
+            .push_client(WClientState::new(win, frame_win, geom, is_floating));
+
+        self.recompute_layout()?;
+
         self.conn.grab_server()?;
         self.conn.change_save_set(SetMode::INSERT, win)?;
 
         let cookie = self.conn.reparent_window(win, frame_win, 0, 0)?;
         self.conn
             .configure_window(win, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE))?;
+        self.set_client_state(win, WindowState::Normal)?;
 
         self.conn.map_window(win)?;
         self.conn.map_window(frame_win)?;
         self.conn.ungrab_server()?;
 
         self.unfocus_focused_client()?;
-
-        self.focused_workspace
-            .borrow_mut()
-            .push_client(WClientState::new(win, frame_win, geom, is_floating));
 
         self.conn.flush()?;
 
@@ -252,32 +279,41 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.ignore_sequences
             .push(Reverse(cookie.sequence_number() as u16));
 
-        self.recompute_layout()?;
-
         self.focus_selected()?;
         self.warp_pointer_to_focused_client()?;
 
         Ok(())
     }
 
-    fn update_client_list(&self) -> Result<(), ReplyOrIdError> {
-        self.conn
-            .delete_property(self.screen.root, self.atoms._NET_CLIENT_LIST)?;
+    fn for_all_clients<F: Fn(&ClientCell) -> bool>(&self, cb: F) -> bool {
+        let mut success = false;
         for mon in self.monitors.inner().iter() {
             for ws in mon.borrow().workspaces.inner().iter() {
                 for c in ws.borrow().clients.inner().iter() {
-                    self.conn.change_property(
-                        PropMode::APPEND,
-                        self.screen.root,
-                        self.atoms._NET_CLIENT_LIST,
-                        self.atoms.WINDOW,
-                        32,
-                        1,
-                        &c.borrow().window.to_ne_bytes(),
-                    )?;
+                    success = cb(c);
                 }
             }
         }
+        success
+    }
+
+    fn update_client_list(&self) -> Result<(), ReplyOrIdError> {
+        self.conn
+            .delete_property(self.screen.root, self.atoms._NET_CLIENT_LIST)?;
+        self.for_all_clients(|c| {
+            self.conn
+                .change_property(
+                    PropMode::APPEND,
+                    self.screen.root,
+                    self.atoms._NET_CLIENT_LIST,
+                    self.atoms.WINDOW,
+                    32,
+                    1,
+                    &c.borrow().window.to_ne_bytes(),
+                )
+                .unwrap();
+            true
+        });
         self.conn.flush()?;
         Ok(())
     }
@@ -324,13 +360,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) -> Result<(), ReplyOrIdError> {
-        println!("======================= got unmap event: {evt:#?}");
-        self.reparent_and_destroy_frame(evt.window);
-        self.recompute_layout()?;
+        if self.for_all_clients(|c| c.borrow().window == evt.window) {
+            self.unmanage(evt.window, false)?;
+        }
         Ok(())
     }
 
-    fn reparent_and_destroy_frame(&mut self, window: Window) {
+    fn detach(&mut self, window: Window) {
         let root = self.screen.root;
         let conn = self.conn;
 
@@ -349,6 +385,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             conn.ungrab_server().unwrap();
             false
         });
+        self.focused_client = None;
     }
 
     fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
@@ -361,6 +398,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn handle_map_request(&mut self, evt: MapRequestEvent) -> Result<(), ReplyOrIdError> {
         println!("got map request: {evt:#?}");
+        let wa = self.conn.get_window_attributes(evt.window)?;
+        if let Ok(wa) = wa.reply() {
+            if wa.override_redirect {
+                return Ok(());
+            }
+        } else {
+            return Ok(());
+        }
         self.manage_window(evt.window, &self.conn.get_geometry(evt.window)?.reply()?)
     }
 
@@ -389,7 +434,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
     }
 
-    fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyError> {
+    fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyOrIdError> {
+        // println!("got enter event: {evt:#?}");
         // FIXME: maybe there's a better way?
         if self.ignore_enter {
             self.ignore_enter = false;
@@ -410,6 +456,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if frame == entered_win || window == entered_win {
             return Ok(());
         }
+        println!("unfocusing focused in handle enter");
         self.unfocus_focused_client()?;
 
         {
@@ -429,7 +476,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn focus_selected(&mut self) -> Result<(), ReplyError> {
+    fn focus_selected(&mut self) -> Result<(), ReplyOrIdError> {
         let ws = self.focused_workspace.borrow();
         self.focused_client = ws.focused_client();
 
@@ -466,8 +513,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let focus_aux = ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_FOCUSED);
         self.conn.change_window_attributes(frame, &focus_aux)?;
 
-        self.ignore_enter = true;
-
         self.conn.flush()?;
 
         Ok(())
@@ -475,13 +520,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn unfocus_focused_client(&mut self) -> Result<(), ReplyError> {
         if let Some(client) = &self.focused_client {
-            let frame = client.borrow().frame;
+            let c = client.borrow();
             let unfocus_aux =
                 ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_UNFOCUSED);
-            self.conn.change_window_attributes(frame, &unfocus_aux)?;
+            self.conn.change_window_attributes(c.frame, &unfocus_aux)?;
+            self.conn
+                .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
             self.conn.flush()?;
-            self.focused_client = None;
         }
+        self.focused_client = None;
         Ok(())
     }
 
@@ -581,7 +628,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         };
 
-        println!("Focused client window: {window}");
+        // println!("Focused client window: {window}");
 
         let delete_exists = self.window_property_exists(
             window,
@@ -590,11 +637,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM_ATOM,
         )?;
 
-        println!("window has WM_DELETE_WINDOW: {delete_exists}");
+        // println!("window has WM_DELETE_WINDOW: {delete_exists}");
 
-        self.reparent_and_destroy_frame(window);
+        self.detach(window);
 
-        println!("destroyed frame");
+        // println!("destroyed frame");
 
         if delete_exists {
             println!("sending delete event to {window}");
@@ -604,15 +651,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.destroy_window(window)?;
         }
         self.conn.flush()?;
-
-        self.recompute_layout()?;
-
-        println!("recomputing layout");
-
-        self.focus_selected()?;
-        println!("focusing selected");
-        self.warp_pointer_to_focused_client()?;
-        println!("warping pointer to focused client");
 
         return Ok(true);
     }
@@ -743,6 +781,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::MapRequest(e) => self.handle_map_request(e)?,
             Event::Expose(e) => self.handle_expose(e),
             Event::EnterNotify(e) => self.handle_enter(e)?,
+            Event::DestroyNotify(e) => self.handle_destroy(e)?,
             Event::ButtonPress(e) => self.handle_button_press(e),
             Event::ButtonRelease(e) => self.handle_button_release(e)?,
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
@@ -753,6 +792,39 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         Ok(ShouldExit::No)
+    }
+
+    fn set_client_state(&mut self, win: Window, state: WindowState) -> Result<(), ReplyOrIdError> {
+        self.conn.change_property(
+            PropMode::REPLACE,
+            win,
+            self.atoms.WM_STATE,
+            self.atoms.WM_STATE,
+            8,
+            2,
+            &[state as u8, 0],
+        )?;
+        Ok(())
+    }
+
+    fn unmanage(&mut self, win: Window, destroyed: bool) -> Result<(), ReplyOrIdError> {
+        self.detach(win);
+        if !destroyed {
+            self.conn.grab_server()?;
+            self.set_client_state(win, WindowState::Withdrawn)?;
+            self.conn.sync()?;
+            self.conn.ungrab_server()?;
+        }
+        self.focus_selected()?;
+        self.update_client_list()?;
+        self.recompute_layout()?;
+        self.warp_pointer_to_focused_client()?;
+        Ok(())
+    }
+
+    fn handle_destroy(&mut self, e: DestroyNotifyEvent) -> Result<(), ReplyOrIdError> {
+        self.unmanage(e.window, true)?;
+        Ok(())
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -769,7 +841,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn focus_adjacent_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyError> {
+    fn focus_adjacent_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
         self.unfocus_focused_client()?;
 
         match dir {

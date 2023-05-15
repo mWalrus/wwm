@@ -193,7 +193,7 @@ impl<T: Default> WVec<T> {
 
     fn check_bounds(&mut self) {
         if self.index >= self.inner.len() {
-            self.index = self.inner.len() - 1;
+            self.index = self.inner.len().saturating_sub(1);
         }
     }
 

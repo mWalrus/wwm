@@ -19,6 +19,7 @@ atom_manager! {
         WM_DELETE_WINDOW,
         WM_STATE,
         WM_TAKE_FOCUS,
+        WM_TRANSIENT_FOR,
         ATOM,
         ATOM_ATOM,
         WINDOW,

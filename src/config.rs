@@ -1,14 +1,12 @@
 pub mod theme {
     pub static WINDOW_BORDER_FOCUSED: u32 = 0xca9ee6;
-    pub static WINDOW_BORDER_UNFOCUSED: u32 = 0x3b3b3b;
-}
-
-pub mod window {
-    pub static MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
+    pub static WINDOW_BORDER_UNFOCUSED: u32 = 0x4c4f69;
 }
 
 pub mod workspaces {
     pub const WORKSPACE_CAP: usize = 9;
+    pub const MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
+    pub const WIDTH_ADJUSTMENT_FACTOR: f32 = 0.02;
 }
 
 pub mod mouse {
@@ -40,6 +38,8 @@ pub mod commands {
             WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClientPrev),
             WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClientNext),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
+            WKeybind::new(MOD | SHIFT, ks::KEY_h,      WCommand::DecreaseMainWidth),
+            WKeybind::new(MOD | SHIFT, ks::KEY_l,      WCommand::IncreaseMainWidth),
             WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusClientNext),
             WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusClientPrev),
             WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitorPrev),

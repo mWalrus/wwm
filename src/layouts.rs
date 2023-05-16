@@ -1,6 +1,5 @@
 use crate::{
     client::{ClientRect, WClientState},
-    config::window::MAIN_CLIENT_WIDTH_PERCENTAGE,
     monitor::WMonitor,
     util::ClientCell,
 };
@@ -15,6 +14,7 @@ pub enum WLayout {
 
 pub fn layout_clients(
     layout: &WLayout,
+    width_factor: f32,
     monitor: &WMonitor,
     clients: &Vec<&ClientCell>,
 ) -> Option<Vec<ClientRect>> {
@@ -23,7 +23,7 @@ pub fn layout_clients(
     }
 
     let rects = match layout {
-        WLayout::Tile => tile(monitor, clients),
+        WLayout::Tile => tile(monitor, width_factor, clients),
         WLayout::Column => col(monitor, clients),
         _ => todo!(),
     };
@@ -31,14 +31,14 @@ pub fn layout_clients(
     Some(rects)
 }
 
-fn tile(mon: &WMonitor, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
+fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
     let c = clients[0].borrow();
     let bw = c.border_width;
     if clients.len() == 1 {
         return single_client(mon, &c);
     }
 
-    let main_width = mon.width_from_percentage(MAIN_CLIENT_WIDTH_PERCENTAGE);
+    let main_width = mon.width_from_percentage(width_factor);
 
     let mut rects = vec![];
 

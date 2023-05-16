@@ -23,7 +23,7 @@ impl From<&MonitorInfo> for WMonitor {
         println!("Monitor: {mi:?}");
         let mut workspaces = Vec::with_capacity(WORKSPACE_CAP);
         for _ in 0..WORKSPACE_CAP {
-            workspaces.push(WWorkspace::default());
+            workspaces.push(WWorkspace::new());
         }
         let workspaces = WVec::new(workspaces, 0);
         Self {

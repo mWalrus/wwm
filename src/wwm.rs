@@ -1,6 +1,9 @@
 use crate::{
     client::WClientState,
-    config::{auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme},
+    config::{
+        auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme,
+        workspaces::WIDTH_ADJUSTMENT_FACTOR,
+    },
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
@@ -329,6 +332,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let rects = layout_clients(
             &self.layout,
+            ws.width_factor,
             &self.focused_monitor.borrow(),
             &non_floating_clients,
         );
@@ -699,6 +703,26 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 if self.destroy_window()? {
                     self.ignore_enter = true;
                 }
+            }
+            WCommand::IncreaseMainWidth => {
+                {
+                    let mut ws = self.focused_workspace.borrow_mut();
+                    if ws.width_factor + WIDTH_ADJUSTMENT_FACTOR > 0.95 {
+                        return Ok(());
+                    }
+                    ws.width_factor += WIDTH_ADJUSTMENT_FACTOR;
+                }
+                self.recompute_layout()?;
+            }
+            WCommand::DecreaseMainWidth => {
+                {
+                    let mut ws = self.focused_workspace.borrow_mut();
+                    if ws.width_factor - WIDTH_ADJUSTMENT_FACTOR < 0.05 {
+                        return Ok(());
+                    }
+                    ws.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
+                }
+                self.recompute_layout()?;
             }
             WCommand::Exit => self.try_exit(),
             WCommand::Idle => {}

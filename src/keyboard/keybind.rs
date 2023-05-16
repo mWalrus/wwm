@@ -32,5 +32,7 @@ pub enum WCommand {
     FocusMonitorNext,
     FocusMonitorPrev,
     Idle,
+    IncreaseMainWidth,
+    DecreaseMainWidth,
     Spawn(&'static [&'static str]),
 }

@@ -2,6 +2,7 @@ use x11rb::protocol::xproto::Window;
 
 use crate::{
     client::WClientState,
+    config::workspaces::MAIN_CLIENT_WIDTH_PERCENTAGE,
     layouts::WLayout,
     util::{ClientCell, WVec},
 };
@@ -9,6 +10,7 @@ use crate::{
 #[derive(Default, Debug)]
 pub struct WWorkspace {
     pub clients: WVec<WClientState>,
+    pub width_factor: f32,
     pub layout: WLayout,
 }
 
@@ -18,15 +20,24 @@ pub enum StackDirection {
 }
 
 impl WWorkspace {
+    pub fn new() -> Self {
+        Self {
+            width_factor: MAIN_CLIENT_WIDTH_PERCENTAGE,
+            ..Default::default()
+        }
+    }
+
     pub fn has_client(&self, win: Window) -> bool {
         self.find_client_by_win(win).is_some()
     }
+
     pub fn find_client_by_win(&self, win: Window) -> Option<ClientCell> {
         self.clients.find(|c| {
             let c = c.borrow();
             c.frame == win || c.window == win
         })
     }
+
     pub fn focus_from_frame(&mut self, frame: Window) -> Option<ClientCell> {
         self.clients.find_and_select(|c| c.borrow().frame == frame);
         self.clients.selected()

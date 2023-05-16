@@ -4,7 +4,7 @@ use x11rb::protocol::randr::MonitorInfo;
 
 use crate::{
     config::workspaces::WORKSPACE_CAP,
-    util::WVec,
+    util::{StateError, WVec},
     workspace::{StackDirection, WWorkspace},
 };
 
@@ -44,6 +44,14 @@ impl WMonitor {
             StackDirection::Next => self.workspaces.next_index(true, true).unwrap(),
         };
         self.focused_workspace()
+    }
+
+    pub fn is_focused_workspace(&self, idx: usize) -> bool {
+        self.workspaces.index() == idx
+    }
+
+    pub fn focus_workspace_from_index(&mut self, idx: usize) -> Result<(), StateError> {
+        self.workspaces.select(idx)
     }
 
     pub fn focused_workspace(&self) -> Rc<RefCell<WWorkspace>> {

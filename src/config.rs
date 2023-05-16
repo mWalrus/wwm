@@ -45,6 +45,16 @@ pub mod commands {
             WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitorPrev),
             WKeybind::new(MOD,         ks::KEY_l,      WCommand::FocusMonitorNext),
             WKeybind::new(MOD,         ks::KEY_q,      WCommand::Exit),
+            // workspace keybinds
+            WKeybind::new(MOD,         ks::KEY_1,      WCommand::SelectWorkspace(0)),
+            WKeybind::new(MOD,         ks::KEY_2,      WCommand::SelectWorkspace(1)),
+            WKeybind::new(MOD,         ks::KEY_3,      WCommand::SelectWorkspace(2)),
+            WKeybind::new(MOD,         ks::KEY_4,      WCommand::SelectWorkspace(3)),
+            WKeybind::new(MOD,         ks::KEY_5,      WCommand::SelectWorkspace(4)),
+            WKeybind::new(MOD,         ks::KEY_6,      WCommand::SelectWorkspace(5)),
+            WKeybind::new(MOD,         ks::KEY_7,      WCommand::SelectWorkspace(6)),
+            WKeybind::new(MOD,         ks::KEY_8,      WCommand::SelectWorkspace(7)),
+            WKeybind::new(MOD,         ks::KEY_9,      WCommand::SelectWorkspace(8)),
         ]
     }
 }

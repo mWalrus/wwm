@@ -724,9 +724,35 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 }
                 self.recompute_layout()?;
             }
+            WCommand::SelectWorkspace(idx) => self.select_workspace(idx).unwrap(),
             WCommand::Exit => self.try_exit(),
             WCommand::Idle => {}
         }
+        Ok(())
+    }
+
+    fn select_workspace(&mut self, idx: usize) -> Result<(), ReplyOrIdError> {
+        {
+            let m = self.focused_monitor.borrow();
+            // early return since we dont want to do anything here
+            if m.is_focused_workspace(idx) {
+                return Ok(());
+            }
+        }
+
+        self.focused_workspace.borrow().hide_clients(self.conn)?;
+
+        {
+            let mut m = self.focused_monitor.borrow_mut();
+            m.focus_workspace_from_index(idx).unwrap();
+            self.focused_workspace = m.focused_workspace();
+            self.focused_client = self.focused_workspace.borrow().focused_client();
+        }
+
+        self.recompute_layout()?;
+
+        self.warp_pointer_to_focused_client()?;
+
         Ok(())
     }
 

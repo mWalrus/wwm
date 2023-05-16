@@ -34,5 +34,6 @@ pub enum WCommand {
     Idle,
     IncreaseMainWidth,
     DecreaseMainWidth,
+    SelectWorkspace(usize),
     Spawn(&'static [&'static str]),
 }

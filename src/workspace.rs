@@ -1,4 +1,8 @@
-use x11rb::protocol::xproto::Window;
+use x11rb::{
+    connection::Connection,
+    protocol::xproto::{ConfigureWindowAux, ConnectionExt, Window},
+    xcb_ffi::ReplyOrIdError,
+};
 
 use crate::{
     client::WClientState,
@@ -25,6 +29,16 @@ impl WWorkspace {
             width_factor: MAIN_CLIENT_WIDTH_PERCENTAGE,
             ..Default::default()
         }
+    }
+
+    pub fn hide_clients<C: Connection>(&self, conn: &C) -> Result<(), ReplyOrIdError> {
+        for c in self.clients.inner().iter() {
+            let c = c.borrow();
+            let aux = ConfigureWindowAux::new().x(c.rect.width as i32 * -2);
+            conn.configure_window(c.frame, &aux)?;
+        }
+        conn.flush()?;
+        Ok(())
     }
 
     pub fn has_client(&self, win: Window) -> bool {

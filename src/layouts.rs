@@ -47,14 +47,27 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
     ));
 
     let non_main_window_count = clients.len() - 1;
-    let stack_client_height = mon.height / non_main_window_count as u16;
+    let non_main_height = mon.height / non_main_window_count as u16;
 
     for (i, _) in clients.iter().skip(1).enumerate() {
+        let cy = mon.y + (i as u16 * non_main_height) as i16;
+        let mut ch = non_main_height;
+
+        if i == non_main_window_count - 1 {
+            let ctot = cy + ch as i16;
+            let mtot = mon.y + mon.height as i16;
+            if ctot > mtot {
+                ch -= ctot.abs_diff(mtot);
+            } else if ctot < mtot {
+                ch += ctot.abs_diff(mtot);
+            }
+        }
+
         rects.push(ClientRect::new(
             mon.x + main_width as i16,
-            mon.y + (i as u16 * stack_client_height) as i16,
+            cy,
             mon.width - main_width - (CLIENT_BORDER_WIDTH * 2),
-            stack_client_height - (CLIENT_BORDER_WIDTH * 2),
+            ch - (CLIENT_BORDER_WIDTH * 2),
         ));
     }
 

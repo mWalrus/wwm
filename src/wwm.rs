@@ -1,8 +1,10 @@
 use crate::{
     client::WClientState,
     config::{
-        auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme,
-        workspaces::WIDTH_ADJUSTMENT_FACTOR,
+        auto_start::AUTO_START_COMMANDS,
+        mouse::DRAG_BUTTON,
+        theme,
+        workspaces::{CLIENT_BORDER_WIDTH, WIDTH_ADJUSTMENT_FACTOR},
     },
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
@@ -589,7 +591,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         //     println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
         // }
 
-        let mut conf_aux = ConfigureWindowAux::new().border_width(1);
+        let mut conf_aux = ConfigureWindowAux::new().border_width(CLIENT_BORDER_WIDTH as u32);
 
         // make sure floating windows get mapped inside the current monitor's geometry
         if is_floating {

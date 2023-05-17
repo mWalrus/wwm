@@ -56,17 +56,15 @@ impl ClientRect {
 #[derive(Default, Debug, Clone, Copy)]
 pub struct WClientState {
     pub window: Window,
-    pub frame: Window,
     pub rect: ClientRect,
     pub border_width: u16,
     pub is_floating: bool,
 }
 
 impl WClientState {
-    pub fn new(window: Window, frame: Window, geom: &GetGeometryReply, is_floating: bool) -> Self {
+    pub fn new(window: Window, geom: &GetGeometryReply, is_floating: bool) -> Self {
         Self {
             window,
-            frame,
             rect: geom.into(),
             border_width: 1,
             is_floating,

@@ -30,17 +30,17 @@ use x11rb::{
         xkb::StateNotifyEvent,
         xproto::{
             ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
-            ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, CreateWindowAux,
-            DestroyNotifyEvent, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
-            InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent, PropMode,
-            Screen, SetMode, StackMode, UnmapNotifyEvent, Window, WindowClass,
+            ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, DestroyNotifyEvent,
+            EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, InputFocus, KeyPressEvent,
+            MapRequestEvent, MapState, MotionNotifyEvent, PropMode, Screen, SetMode, StackMode,
+            UnmapNotifyEvent, Window,
         },
         ErrorKind, Event,
     },
     resource_manager::new_from_default,
     rust_connection::{ReplyError, ReplyOrIdError},
     wrapper::ConnectionExt as _,
-    COPY_DEPTH_FROM_PARENT, CURRENT_TIME, NONE,
+    CURRENT_TIME, NONE,
 };
 
 #[repr(u8)]
@@ -203,21 +203,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         win: Window,
         geom: &GetGeometryReply,
     ) -> Result<(), ReplyOrIdError> {
-        let frame_win = self.conn.generate_id()?;
-
-        let frame_aux = CreateWindowAux::new()
-            .event_mask(
-                EventMask::EXPOSURE
-                    | EventMask::SUBSTRUCTURE_NOTIFY
-                    | EventMask::ENTER_WINDOW
-                    | EventMask::LEAVE_WINDOW
-                    | EventMask::FOCUS_CHANGE
-                    | EventMask::STRUCTURE_NOTIFY
-                    | EventMask::PROPERTY_CHANGE,
-            )
-            .border_pixel(theme::WINDOW_BORDER_UNFOCUSED)
-            .background_pixel(self.screen.black_pixel);
-
         let is_floating = self.window_property_exists(
             win,
             self.atoms._NET_WM_WINDOW_TYPE_DIALOG,
@@ -225,7 +210,37 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM,
         )?;
 
-        println!("{win} floating?: {is_floating}");
+        // WM_TRANSIENT_FOR Property
+
+        // The WM_TRANSIENT_FOR property (of type WINDOW) contains the ID of another top-level window.
+        // The implication is that this window is a pop-up on behalf of the named window, and window
+        // managers may decide not to decorate transient windows or may treat them differently in other ways.
+        // In particular, window managers should present newly mapped WM_TRANSIENT_FOR windows without
+        // requiring any user interaction, even if mapping top-level windows normally does require
+        // interaction. Dialogue boxes, for example, are an example of windows that should have
+        // WM_TRANSIENT_FOR set.
+
+        // It is important not to confuse WM_TRANSIENT_FOR with override-redirect. WM_TRANSIENT_FOR
+        // should be used in those cases where the pointer is not grabbed while the window is mapped
+        // (in other words, if other windows are allowed to be active while the transient is up).
+        // If other windows must be prevented from processing input (for example, when
+        // implementing pop-up menus), use override-redirect and grab the pointer while the window is mapped.
+
+        let trans = self
+            .conn
+            .get_property(
+                false,
+                win,
+                self.atoms.WM_TRANSIENT_FOR,
+                self.atoms.ATOM,
+                0,
+                std::mem::size_of::<u32>() as u32,
+            )?
+            .reply()?;
+        println!("trans: {trans:#?}");
+        if let Some(val) = trans.value32() {
+            println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
+        }
 
         let (mx, my, mw, mh) = {
             let m = self.focused_monitor.borrow();
@@ -245,56 +260,36 @@ impl<'a, C: Connection> WinMan<'a, C> {
         x = x.max(mx);
         y = y.max(my);
 
-        println!("currently selected monitor: {}, {}, {}, {}", mx, my, mw, mh);
-        println!(
-            "creating frame with dims: x -> {}, y -> {}, w -> {}, h -> {}",
-            x, y, geom.width, geom.height
-        );
+        let mut conf_aux = ConfigureWindowAux::new().border_width(1);
+        if is_floating {
+            conf_aux = conf_aux.stack_mode(StackMode::ABOVE);
+        }
 
-        self.conn.create_window(
-            COPY_DEPTH_FROM_PARENT,
-            frame_win,
-            self.screen.root,
-            x,
-            y,
-            geom.width,
-            geom.height,
-            1,
-            WindowClass::INPUT_OUTPUT,
-            0,
-            &frame_aux,
-        )?;
+        let change_aux = ChangeWindowAttributesAux::new()
+            .border_pixel(theme::WINDOW_BORDER_UNFOCUSED)
+            .event_mask(
+                EventMask::ENTER_WINDOW
+                    | EventMask::FOCUS_CHANGE
+                    | EventMask::PROPERTY_CHANGE
+                    | EventMask::STRUCTURE_NOTIFY,
+            );
+
+        self.conn.configure_window(win, &conf_aux)?;
+        self.conn.change_window_attributes(win, &change_aux)?;
 
         self.focused_workspace
             .borrow_mut()
-            .push_client(WClientState::new(win, frame_win, geom, is_floating));
-
-        self.recompute_layout()?;
-
-        self.conn.grab_server()?;
-        self.conn.change_save_set(SetMode::INSERT, win)?;
-
-        let cookie = self.conn.reparent_window(win, frame_win, 0, 0)?;
-        self.conn
-            .configure_window(win, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE))?;
+            .push_client(WClientState::new(win, geom, is_floating));
         self.set_client_state(win, WindowState::Normal)?;
 
+        self.recompute_layout()?;
         self.conn.map_window(win)?;
-        self.conn.map_window(frame_win)?;
-        self.conn.ungrab_server()?;
-
-        self.unfocus_focused_client()?;
-
-        self.conn.flush()?;
-
         self.update_client_list()?;
 
-        // remember and ignore all reparent_window events
-        self.ignore_sequences
-            .push(Reverse(cookie.sequence_number() as u16));
-
+        self.unfocus_focused_client()?;
         self.focus_selected()?;
         self.warp_pointer_to_focused_client()?;
+        self.conn.flush()?;
 
         Ok(())
     }
@@ -353,16 +348,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         for (client, rect) in non_floating_clients.iter().zip(rects.unwrap()) {
-            let frame_aux = ConfigureWindowAux::from(rect)
+            let client_aux = ConfigureWindowAux::from(rect)
                 .sibling(None)
                 .stack_mode(None);
-            let client_aux = frame_aux.clone().x(0).y(0);
 
             let mut c = client.borrow_mut();
             c.rect = rect;
 
             self.conn.configure_window(c.window, &client_aux)?;
-            self.conn.configure_window(c.frame, &frame_aux)?;
         }
         self.conn.flush()?;
         Ok(())
@@ -394,9 +387,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
             conn.grab_server().unwrap();
             conn.change_save_set(SetMode::DELETE, c.window).unwrap();
-            conn.reparent_window(c.window, root, c.rect.x, c.rect.y)
-                .unwrap();
-            conn.destroy_window(c.frame).unwrap();
             conn.ungrab_server().unwrap();
             false
         });
@@ -422,7 +412,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         if self.for_all_clients(|c| {
             let c = c.borrow();
-            c.frame == evt.window || c.window == evt.window
+            c.window == evt.window
         }) {
             return Ok(());
         }
@@ -447,7 +437,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let ws = m.workspaces.selected().unwrap();
             ws.borrow_mut().clients.find_and_select(|c| {
                 let c = c.borrow();
-                c.frame == win || c.window == win
+                c.window == win
             });
             true
         });
@@ -475,23 +465,23 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         if !self.for_all_clients(|c| {
             let c = c.borrow();
-            let c_has_window = c.frame == entered_win || c.window == entered_win;
+            let c_has_window = c.window == entered_win;
             println!("client has window: {c_has_window}");
             c_has_window
         }) {
             return Ok(());
         }
 
-        let (frame, window) = {
+        let window = {
             if let Some(client) = &self.focused_client {
                 let c = client.borrow();
-                (c.frame, c.window)
+                c.window
             } else {
                 return Ok(());
             }
         };
 
-        if frame == entered_win || window == entered_win {
+        if window == entered_win {
             return Ok(());
         }
         println!("unfocusing focused in handle enter");
@@ -506,7 +496,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let mut ws = self.focused_workspace.borrow_mut();
             ws.clients.find_and_select(|c| {
                 let c = c.borrow();
-                c.frame == entered_win || c.window == entered_win
+                c.window == entered_win
             });
         }
 
@@ -518,10 +508,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let ws = self.focused_workspace.borrow();
         self.focused_client = ws.focused_client();
 
-        let (frame, win, is_floating) = {
+        let win = {
             if let Some(client) = &self.focused_client {
                 let c = client.borrow();
-                (c.frame, c.window, c.is_floating)
+                c.window
             } else {
                 return Ok(());
             }
@@ -529,13 +519,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.conn
             .set_input_focus(InputFocus::POINTER_ROOT, win, CURRENT_TIME)?;
-
-        if is_floating {
-            self.conn.configure_window(
-                frame,
-                &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
-            )?;
-        }
 
         self.send_event(win, self.atoms.WM_TAKE_FOCUS)?;
         self.conn.change_property(
@@ -549,7 +532,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         )?;
 
         let focus_aux = ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_FOCUSED);
-        self.conn.change_window_attributes(frame, &focus_aux)?;
+        self.conn.change_window_attributes(win, &focus_aux)?;
 
         self.conn.flush()?;
 
@@ -561,7 +544,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let c = client.borrow();
             let unfocus_aux =
                 ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_UNFOCUSED);
-            self.conn.change_window_attributes(c.frame, &unfocus_aux)?;
+            self.conn.change_window_attributes(c.window, &unfocus_aux)?;
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
             self.conn.flush()?;
@@ -579,7 +562,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let c = client.borrow();
             if self.drag_window.is_none() && evt.event_x < 0.max(c.rect.width as i16) {
                 let (x, y) = (-evt.event_x, -evt.event_y);
-                self.drag_window = Some((c.frame, (x, y)));
+                self.drag_window = Some((c.window, (x, y)));
             }
         }
     }
@@ -793,10 +776,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn warp_pointer_to_focused_client(&self) -> Result<(), ReplyOrIdError> {
         if let Some(client) = &self.focused_client {
             let c = client.borrow();
+            let pointer = self.conn.query_pointer(c.window)?.reply()?;
+            println!("pointer: {pointer:#?}");
+            if !pointer.same_screen {
+                return Ok(());
+            }
             // println!("warping pointer to {} @ rect: {:#?}", c.window, c.rect);
             self.conn.warp_pointer(
                 NONE,
-                c.frame,
+                c.window,
                 0,
                 0,
                 0,

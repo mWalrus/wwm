@@ -35,7 +35,7 @@ impl WWorkspace {
         for c in self.clients.inner().iter() {
             let c = c.borrow();
             let aux = ConfigureWindowAux::new().x(c.rect.width as i32 * -2);
-            conn.configure_window(c.frame, &aux)?;
+            conn.configure_window(c.window, &aux)?;
         }
         conn.flush()?;
         Ok(())
@@ -48,12 +48,12 @@ impl WWorkspace {
     pub fn find_client_by_win(&self, win: Window) -> Option<ClientCell> {
         self.clients.find(|c| {
             let c = c.borrow();
-            c.frame == win || c.window == win
+            c.window == win
         })
     }
 
-    pub fn focus_from_frame(&mut self, frame: Window) -> Option<ClientCell> {
-        self.clients.find_and_select(|c| c.borrow().frame == frame);
+    pub fn focus_from_win(&mut self, win: Window) -> Option<ClientCell> {
+        self.clients.find_and_select(|c| c.borrow().window == win);
         self.clients.selected()
     }
 

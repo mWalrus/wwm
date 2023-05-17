@@ -1,4 +1,5 @@
 # WWM: Wally's Window Manager
+A simple non-reparenting dynamic window manager for X.
 
 ## Screenshots
 __Tiling layout__:
@@ -6,6 +7,9 @@ __Tiling layout__:
 
 __Column layout__:
 ![column layout](./screenshots/screenshot-2.png)
+
+## Configuration
+All configuration is done in code in the [src/config.rs](./src/config.rs) file.
 
 ## Development
 1. On Linux you can enter another session using `Ctrl+Alt+F{3,4,5,...}`.

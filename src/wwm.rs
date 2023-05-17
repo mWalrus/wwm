@@ -262,7 +262,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let mut conf_aux = ConfigureWindowAux::new().border_width(1);
         if is_floating {
-            conf_aux = conf_aux.stack_mode(StackMode::ABOVE);
+            conf_aux = conf_aux
+                .stack_mode(StackMode::ABOVE)
+                .x(x as i32)
+                .y(y as i32);
         }
 
         let change_aux = ChangeWindowAttributesAux::new()

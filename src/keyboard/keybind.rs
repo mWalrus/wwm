@@ -8,9 +8,9 @@ pub struct WKeybind {
 }
 
 impl WKeybind {
-    pub fn new(mods: ModMask, keysym: u32, action: WCommand) -> Self {
+    pub fn new<M: Into<ModMask>>(mods: M, keysym: u32, action: WCommand) -> Self {
         Self {
-            mods,
+            mods: mods.into(),
             keysym,
             action,
         }

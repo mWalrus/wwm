@@ -198,6 +198,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.destroy_window(window)?;
         }
 
+        self.conn.flush()?;
+
         self.ignore_enter = true;
         return Ok(());
     }

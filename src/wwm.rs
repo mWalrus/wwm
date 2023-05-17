@@ -242,26 +242,27 @@ impl<'a, C: Connection> WinMan<'a, C> {
             println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
         }
 
-        let (mx, my, mw, mh) = {
-            let m = self.focused_monitor.borrow();
-            (m.x, m.y, m.width, m.height)
-        };
-
-        let mut x = geom.x;
-        let mut y = geom.y;
-
-        if geom.x + geom.width as i16 > mx + mw as i16 {
-            x = mx + mw as i16 - geom.width as i16 - 2 // borders
-        }
-        if geom.y + geom.height as i16 > my + mh as i16 {
-            y = my + mh as i16 + geom.height as i16 - 2 // borders
-        }
-
-        x = x.max(mx);
-        y = y.max(my);
-
         let mut conf_aux = ConfigureWindowAux::new().border_width(1);
+
         if is_floating {
+            let (mx, my, mw, mh) = {
+                let m = self.focused_monitor.borrow();
+                (m.x, m.y, m.width, m.height)
+            };
+
+            let mut x = geom.x;
+            let mut y = geom.y;
+
+            if geom.x + geom.width as i16 > mx + mw as i16 {
+                x = mx + mw as i16 - geom.width as i16 - 2 // borders
+            }
+            if geom.y + geom.height as i16 > my + mh as i16 {
+                y = my + mh as i16 + geom.height as i16 - 2 // borders
+            }
+
+            x = x.max(mx);
+            y = y.max(my);
+
             conf_aux = conf_aux
                 .stack_mode(StackMode::ABOVE)
                 .x(x as i32)

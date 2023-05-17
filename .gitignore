@@ -1,2 +1,6 @@
 /target
 *.log
+perf.data
+flamegraph.svg
+wallpaper.png
+xephyr.sh

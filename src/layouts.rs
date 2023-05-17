@@ -87,7 +87,7 @@ fn col(mon: &WMonitor, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
         rects.push(ClientRect::new(
             mon.x + (i as i16 * client_width as i16),
             mon.y,
-            mon.width - client_width - (CLIENT_BORDER_WIDTH * 2),
+            client_width - (CLIENT_BORDER_WIDTH * 2),
             mon.height - (CLIENT_BORDER_WIDTH * 2),
         ));
     }

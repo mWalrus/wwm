@@ -71,7 +71,6 @@ pub struct WinMan<'a, C: Connection> {
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
     drag_window: Option<(Window, (i16, i16))>,
-    layout: WLayout,
     keyboard: WKeyboard,
     atoms: AtomCollection,
     ignore_enter: bool,
@@ -116,7 +115,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             focused_client: None, // we havent scanned windows yet so it's always None here
             pending_exposure: Default::default(),
             drag_window: None,
-            layout: WLayout::Tile,
             keyboard,
             atoms,
             ignore_enter: false,
@@ -492,6 +490,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 }
                 self.recompute_layout()?;
             }
+            WCommand::Layout(layout) => self.update_workspace_layout(layout),
             WCommand::SelectWorkspace(idx) => self.select_workspace(idx).unwrap(),
             WCommand::Exit => self.try_exit(),
             WCommand::Idle => {}
@@ -673,7 +672,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .collect();
 
         let rects = layout_clients(
-            &self.layout,
+            &ws.layout,
             ws.width_factor,
             &self.focused_monitor.borrow(),
             &non_floating_clients,
@@ -849,6 +848,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         });
         self.conn.flush()?;
         Ok(())
+    }
+
+    fn update_workspace_layout(&mut self, layout: WLayout) {
+        if self.focused_workspace.borrow_mut().set_layout(layout) {
+            self.recompute_layout().unwrap();
+        }
     }
 
     fn warp_pointer_to_focused_client(&self) -> Result<(), ReplyOrIdError> {

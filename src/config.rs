@@ -19,6 +19,7 @@ pub mod mouse {
 pub mod commands {
     use crate::keyboard::keybind::WCommand;
     use crate::keyboard::keybind::WKeybind;
+    use crate::layouts::WLayout;
     use x11rb::protocol::xproto::ModMask;
     use xkbcommon::xkb::keysyms as ks;
 
@@ -45,6 +46,8 @@ pub mod commands {
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
             WKeybind::new(MOD | SHIFT, ks::KEY_h,      WCommand::DecreaseMainWidth),
             WKeybind::new(MOD | SHIFT, ks::KEY_l,      WCommand::IncreaseMainWidth),
+            WKeybind::new(MOD | SHIFT, ks::KEY_t,      WCommand::Layout(WLayout::Tile)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_c,      WCommand::Layout(WLayout::Column)),
             WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusClientNext),
             WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusClientPrev),
             WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitorPrev),

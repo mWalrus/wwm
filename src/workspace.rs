@@ -90,6 +90,14 @@ impl WWorkspace {
         self.clients.remove_current()
     }
 
+    pub fn set_layout(&mut self, layout: WLayout) -> bool {
+        if self.layout == layout {
+            return false;
+        }
+        self.layout = layout;
+        true
+    }
+
     pub fn swap_with_neighbor(&mut self, dir: StackDirection) {
         let idx = match dir {
             StackDirection::Prev => self.clients.prev_index(true, false),

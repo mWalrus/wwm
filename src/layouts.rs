@@ -5,7 +5,7 @@ use crate::{
     util::ClientCell,
 };
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum WLayout {
     #[default]
     Tile,

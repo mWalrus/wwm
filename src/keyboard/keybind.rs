@@ -1,5 +1,7 @@
 use x11rb::protocol::xproto::{KeyButMask, ModMask};
 
+use crate::layouts::WLayout;
+
 #[derive(Debug)]
 pub struct WKeybind {
     pub mods: ModMask,
@@ -34,6 +36,7 @@ pub enum WCommand {
     Idle,
     IncreaseMainWidth,
     DecreaseMainWidth,
+    Layout(WLayout),
     SelectWorkspace(usize),
     Spawn(&'static [&'static str]),
 }

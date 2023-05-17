@@ -1,6 +1,6 @@
 pub mod theme {
     pub static WINDOW_BORDER_FOCUSED: u32 = 0xca9ee6;
-    pub static WINDOW_BORDER_UNFOCUSED: u32 = 0x4c4f69;
+    pub static WINDOW_BORDER_UNFOCUSED: u32 = 0x51576d;
 }
 
 pub mod workspaces {

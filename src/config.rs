@@ -35,7 +35,6 @@ pub mod commands {
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
-        // can't cast in const declarations so i guess we do it here
         vec![
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
             WKeybind::new(MOD,         ks::KEY_c,      WCommand::Spawn(CHATTERINO_CMD)),

@@ -157,6 +157,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let change = ChangeWindowAttributesAux::default()
             .event_mask(
                 EventMask::SUBSTRUCTURE_REDIRECT
+                    | EventMask::POINTER_MOTION
                     | EventMask::SUBSTRUCTURE_NOTIFY
                     | EventMask::BUTTON_PRESS
                     | EventMask::STRUCTURE_NOTIFY
@@ -226,21 +227,21 @@ impl<'a, C: Connection> WinMan<'a, C> {
         // If other windows must be prevented from processing input (for example, when
         // implementing pop-up menus), use override-redirect and grab the pointer while the window is mapped.
 
-        let trans = self
-            .conn
-            .get_property(
-                false,
-                win,
-                self.atoms.WM_TRANSIENT_FOR,
-                self.atoms.ATOM,
-                0,
-                std::mem::size_of::<u32>() as u32,
-            )?
-            .reply()?;
-        println!("trans: {trans:#?}");
-        if let Some(val) = trans.value32() {
-            println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
-        }
+        // let trans = self
+        //     .conn
+        //     .get_property(
+        //         false,
+        //         win,
+        //         self.atoms.WM_TRANSIENT_FOR,
+        //         self.atoms.ATOM,
+        //         0,
+        //         std::mem::size_of::<u32>() as u32,
+        //     )?
+        //     .reply()?;
+        // println!("trans: {trans:#?}");
+        // if let Some(val) = trans.value32() {
+        //     println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
+        // }
 
         let mut conf_aux = ConfigureWindowAux::new().border_width(1);
 
@@ -290,8 +291,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.map_window(win)?;
         self.update_client_list()?;
 
-        self.unfocus_focused_client()?;
-        self.focus_selected()?;
+        self.unfocus()?;
+        self.focus()?;
         self.warp_pointer_to_focused_client()?;
         self.conn.flush()?;
 
@@ -303,7 +304,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         for mon in self.monitors.inner().iter() {
             for ws in mon.borrow().workspaces.inner().iter() {
                 for c in ws.borrow().clients.inner().iter() {
-                    success = cb(c);
+                    if cb(c) {
+                        success = true;
+                    }
                 }
             }
         }
@@ -379,7 +382,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn detach(&mut self, window: Window) {
-        let root = self.screen.root;
         let conn = self.conn;
 
         let mut ws = self.focused_workspace.borrow_mut();
@@ -406,7 +408,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_map_request(&mut self, evt: MapRequestEvent) -> Result<(), ReplyOrIdError> {
-        println!("got map request: {evt:#?}");
         let wa = self.conn.get_window_attributes(evt.window)?;
         match wa.reply() {
             Ok(wa) if wa.override_redirect => return Ok(()),
@@ -450,8 +451,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyOrIdError> {
-        println!("got enter event: {evt:#?}");
-        // FIXME: maybe there's a better way?
         if self.ignore_enter {
             self.ignore_enter = false;
             return Ok(());
@@ -469,27 +468,19 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         if !self.for_all_clients(|c| {
             let c = c.borrow();
-            let c_has_window = c.window == entered_win;
-            println!("client has window: {c_has_window}");
-            c_has_window
+            c.window == entered_win
         }) {
             return Ok(());
         }
 
-        let window = {
-            if let Some(client) = &self.focused_client {
-                let c = client.borrow();
-                c.window
-            } else {
+        if let Some(client) = &self.focused_client {
+            let c = client.borrow();
+            if c.window == entered_win {
                 return Ok(());
             }
-        };
-
-        if window == entered_win {
-            return Ok(());
         }
-        println!("unfocusing focused in handle enter");
-        self.unfocus_focused_client()?;
+
+        self.unfocus()?;
 
         {
             let in_workspace = self.focused_workspace.borrow().has_client(entered_win);
@@ -504,11 +495,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
             });
         }
 
-        self.focus_selected()?;
+        self.focus()?;
         Ok(())
     }
 
-    fn focus_selected(&mut self) -> Result<(), ReplyOrIdError> {
+    fn focus(&mut self) -> Result<(), ReplyOrIdError> {
         let ws = self.focused_workspace.borrow();
         self.focused_client = ws.focused_client();
 
@@ -543,7 +534,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn unfocus_focused_client(&mut self) -> Result<(), ReplyError> {
+    fn unfocus(&mut self) -> Result<(), ReplyError> {
         if let Some(client) = &self.focused_client {
             let c = client.borrow();
             let unfocus_aux =
@@ -579,7 +570,21 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyError> {
+    fn focus_at_pointer(&mut self, evt: &MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
+        self.monitors
+            .find_and_select(|m| m.borrow().has_pointer(evt));
+        self.unfocus()?;
+        self.focused_monitor = self.monitors.selected().unwrap();
+        self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
+        self.focus()?;
+        Ok(())
+    }
+
+    fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
+        if !self.focused_monitor.borrow().has_pointer(&evt) {
+            self.focus_at_pointer(&evt)?;
+        }
+
         if let Some((win, (x, y))) = self.drag_window {
             let (x, y) = (x + evt.root_x, y + evt.root_y);
             let (x, y) = (x as i32, y as i32);
@@ -607,28 +612,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 std::mem::size_of::<u32>() as u32,
             )?
             .reply()?;
+        let mut found = false;
         if let Some(mut value) = reply.value32() {
-            let found = value.find(|a| a == &atom).is_some();
-            // for v in value.into_iter() {
-            //     println!("atom {v} ? {atom}");
-            // }
-            return Ok(found);
+            found = value.find(|a| a == &atom).is_some();
         } else if let Some(mut value) = reply.value16() {
-            let atom = atom as u16;
-            let found = value.find(|a| a == &atom).is_some();
-            // for v in value.into_iter() {
-            //     println!("atom {v} ? {atom}");
-            // }
-            return Ok(found);
+            found = value.find(|a| a == &(atom as u16)).is_some();
         } else if let Some(mut value) = reply.value8() {
-            let atom = atom as u8;
-            let found = value.find(|a| a == &atom).is_some();
-            // for v in value.into_iter() {
-            //     println!("atom {v} ? {atom}");
-            // }
-            return Ok(found);
+            found = value.find(|a| a == &(atom as u8)).is_some();
         }
-        Ok(false)
+        Ok(found)
     }
 
     fn send_event(&self, window: Window, proto: u32) -> Result<(), ReplyError> {
@@ -653,8 +645,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         };
 
-        // println!("Focused client window: {window}");
-
         let delete_exists = self.window_property_exists(
             window,
             self.atoms.WM_DELETE_WINDOW,
@@ -662,17 +652,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM_ATOM,
         )?;
 
-        // println!("window has WM_DELETE_WINDOW: {delete_exists}");
-
         self.detach(window);
 
-        // println!("destroyed frame");
-
         if delete_exists {
-            println!("sending delete event to {window}");
             self.send_event(window, self.atoms.WM_DELETE_WINDOW)?;
         } else {
-            println!("destroying window {window}");
             self.conn.destroy_window(window)?;
         }
         self.conn.flush()?;
@@ -720,7 +704,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WCommand::FocusMonitorPrev => self.focus_adjacent_monitor(StackDirection::Prev)?,
             WCommand::Spawn(cmd) => self.spawn_program(cmd),
             WCommand::Destroy => {
-                println!("============= got destroy =============");
                 if self.destroy_window()? {
                     self.ignore_enter = true;
                 }
@@ -781,11 +764,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if let Some(client) = &self.focused_client {
             let c = client.borrow();
             let pointer = self.conn.query_pointer(c.window)?.reply()?;
-            println!("pointer: {pointer:#?}");
             if !pointer.same_screen {
                 return Ok(());
             }
-            // println!("warping pointer to {} @ rect: {:#?}", c.window, c.rect);
             self.conn.warp_pointer(
                 NONE,
                 c.window,
@@ -818,16 +799,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn focus_adjacent(&mut self, dir: StackDirection) {
-        self.unfocus_focused_client().unwrap();
+        self.unfocus().unwrap();
         {
             self.focused_workspace.borrow_mut().focus_neighbor(dir);
         }
-        self.focus_selected().unwrap();
+        self.focus().unwrap();
         self.warp_pointer_to_focused_client().unwrap();
     }
 
     fn handle_xkb_state_notify(&mut self, evt: StateNotifyEvent) -> Result<(), ReplyOrIdError> {
-        // println!("EVENT: {evt:#?}");
         if i32::try_from(evt.device_id).unwrap() == self.keyboard.device_id {
             self.keyboard.update_state_mask(evt);
         }
@@ -891,7 +871,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.sync()?;
             self.conn.ungrab_server()?;
         }
-        self.focus_selected()?;
+        self.focus()?;
         self.update_client_list()?;
         self.recompute_layout()?;
         self.warp_pointer_to_focused_client()?;
@@ -918,7 +898,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn focus_adjacent_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
-        self.unfocus_focused_client()?;
+        self.unfocus()?;
 
         match dir {
             StackDirection::Prev => self.monitors.prev_index(true, true),
@@ -933,7 +913,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.warp_pointer_to_focused_monitor().unwrap();
 
-        self.focus_selected()?;
+        self.focus()?;
 
         self.warp_pointer_to_focused_client().unwrap();
         Ok(())

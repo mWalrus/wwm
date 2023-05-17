@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use x11rb::protocol::randr::MonitorInfo;
+use x11rb::protocol::{randr::MonitorInfo, xproto::MotionNotifyEvent};
 
 use crate::{
     config::workspaces::WORKSPACE_CAP,
@@ -20,7 +20,6 @@ pub struct WMonitor {
 
 impl From<&MonitorInfo> for WMonitor {
     fn from(mi: &MonitorInfo) -> Self {
-        println!("Monitor: {mi:?}");
         let mut workspaces = Vec::with_capacity(WORKSPACE_CAP);
         for _ in 0..WORKSPACE_CAP {
             workspaces.push(WWorkspace::new());
@@ -44,6 +43,12 @@ impl WMonitor {
             StackDirection::Next => self.workspaces.next_index(true, true).unwrap(),
         };
         self.focused_workspace()
+    }
+
+    pub fn has_pointer(&self, e: &MotionNotifyEvent) -> bool {
+        let has_x = e.event_x >= self.x && e.event_x <= self.x + self.width as i16;
+        let has_y = e.event_y >= self.y && e.event_y <= self.y + self.height as i16;
+        has_x && has_y
     }
 
     pub fn is_focused_workspace(&self, idx: usize) -> bool {

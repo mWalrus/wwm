@@ -98,7 +98,6 @@ impl WKeyboard {
 
             for keybind in &keybinds {
                 if syms.contains(&keybind.keysym) {
-                    println!("GRAB: {:#?}", keybind);
                     for m in &modifiers {
                         conn.grab_key(
                             true,

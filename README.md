@@ -1,5 +1,8 @@
 # WWM: Wally's Window Manager
 
+## Screenshots
+![screenshot 1](./screenshots/screenshot-1.png)
+
 ## Development
 1. On Linux you can enter another session using `Ctrl+Alt+F{3,4,5,...}`.
 2. Once in a new session, log into it and go to the project root.

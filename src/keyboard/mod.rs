@@ -53,12 +53,12 @@ impl WKeyboard {
         let device_id = xkbc::x11::get_core_keyboard_device_id(xcb_conn);
         let keymap = xkbc::x11::keymap_new_from_device(
             &context,
-            &xcb_conn,
+            xcb_conn,
             device_id,
             xkbc::KEYMAP_COMPILE_NO_FLAGS,
         );
 
-        let state = xkbc::x11::state_new_from_device(&keymap, &xcb_conn, device_id);
+        let state = xkbc::x11::state_new_from_device(&keymap, xcb_conn, device_id);
 
         // grab all keybinds
         let keybinds = commands::setup_keybinds();

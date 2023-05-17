@@ -36,10 +36,7 @@ impl WWorkspace {
             StackDirection::Prev => self.clients.prev_index(true, true),
             StackDirection::Next => self.clients.next_index(true, true),
         };
-
-        if idx.is_none() {
-            return None;
-        }
+        idx?;
 
         self.focused_client()
     }

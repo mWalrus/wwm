@@ -102,8 +102,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let focused_workspace = {
             let mon = focused_monitor.borrow();
-            let ws = mon.workspaces.selected().unwrap();
-            ws
+            mon.workspaces.selected().unwrap()
         };
 
         let mut wwm = Self {
@@ -133,7 +132,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             // self.refresh();
             self.conn.flush()?;
 
-            while let Some(event) = self.conn.wait_for_event().ok() {
+            while let Ok(event) = self.conn.wait_for_event() {
                 if self.handle_event(event)? == ShouldExit::Yes {
                     break 'eventloop;
                 }
@@ -201,7 +200,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.flush()?;
 
         self.ignore_enter = true;
-        return Ok(());
+        Ok(())
     }
 
     fn detach(&mut self, window: Window) {
@@ -392,10 +391,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        if !self.for_all_clients(|c| {
+        let was_managed = self.for_all_clients(|c| {
             let c = c.borrow();
             c.window == entered_win
-        }) {
+        });
+
+        if !was_managed {
             return Ok(());
         }
 
@@ -504,10 +505,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Ok(_) => {}
         }
 
-        if self.for_all_clients(|c| {
+        let was_managed = self.for_all_clients(|c| {
             let c = c.borrow();
             c.window == evt.window
-        }) {
+        });
+
+        if was_managed {
             return Ok(());
         }
 
@@ -904,11 +907,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .reply()?;
         let mut found = false;
         if let Some(mut value) = reply.value32() {
-            found = value.find(|a| a == &atom).is_some();
+            found = value.any(|a| a == atom);
         } else if let Some(mut value) = reply.value16() {
-            found = value.find(|a| a == &(atom as u16)).is_some();
+            found = value.any(|a| a == atom as u16);
         } else if let Some(mut value) = reply.value8() {
-            found = value.find(|a| a == &(atom as u8)).is_some();
+            found = value.any(|a| a == atom as u8);
         }
         Ok(found)
     }

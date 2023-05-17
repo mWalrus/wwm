@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{
     client::ClientRect, config::workspaces::CLIENT_BORDER_WIDTH, monitor::WMonitor,
     util::ClientCell,
@@ -56,10 +58,11 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
         if i == non_main_window_count - 1 {
             let ctot = cy + ch as i16;
             let mtot = mon.y + mon.height as i16;
-            if ctot > mtot {
-                ch -= ctot.abs_diff(mtot);
-            } else if ctot < mtot {
-                ch += ctot.abs_diff(mtot);
+
+            match ctot.cmp(&mtot) {
+                Ordering::Less => ch -= ctot.abs_diff(mtot),
+                Ordering::Greater => ch += ctot.abs_diff(mtot),
+                _ => {}
             }
         }
 

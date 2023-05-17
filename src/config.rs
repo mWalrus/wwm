@@ -22,20 +22,24 @@ pub mod commands {
     use x11rb::protocol::xproto::ModMask;
     use xkbcommon::xkb::keysyms as ks;
 
-    pub const MOD: ModMask = ModMask::M1;
-    pub const SHIFT: ModMask = ModMask::SHIFT;
+    const MOD: ModMask = ModMask::M1;
+    const SHIFT: ModMask = ModMask::SHIFT;
+    const NONE: u16 = 0;
 
     // spawn commands
     static TERM_CMD: &[&str] = &["alacritty"];
     static CHATTERINO_CMD: &[&str] = &["chatterino"];
     static XEYES_CMD: &[&str] = &["xeyes"];
+    static FLAMESHOT_CMD: &[&str] = &["flameshot", "gui"];
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
+        // can't cast in const declarations so i guess we do it here
         vec![
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
             WKeybind::new(MOD,         ks::KEY_c,      WCommand::Spawn(CHATTERINO_CMD)),
             WKeybind::new(MOD,         ks::KEY_x,      WCommand::Spawn(XEYES_CMD)),
+            WKeybind::new(NONE,        ks::KEY_Print,  WCommand::Spawn(FLAMESHOT_CMD)),
             WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClientPrev),
             WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClientNext),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),

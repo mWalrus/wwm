@@ -1,6 +1,5 @@
 use crate::{
-    client::{ClientRect, WClientState},
-    monitor::WMonitor,
+    client::ClientRect, config::workspaces::CLIENT_BORDER_WIDTH, monitor::WMonitor,
     util::ClientCell,
 };
 
@@ -32,10 +31,8 @@ pub fn layout_clients(
 }
 
 fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
-    let c = clients[0].borrow();
-    let bw = c.border_width;
     if clients.len() == 1 {
-        return single_client(mon, &c);
+        return single_client(mon);
     }
 
     let main_width = mon.width_from_percentage(width_factor);
@@ -45,8 +42,8 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
     rects.push(ClientRect::new(
         mon.x,
         mon.y,
-        main_width - bw * 2,
-        mon.height - bw * 2,
+        main_width - CLIENT_BORDER_WIDTH * 2,
+        mon.height - CLIENT_BORDER_WIDTH * 2,
     ));
 
     let non_main_window_count = clients.len() - 1;
@@ -56,8 +53,8 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
         rects.push(ClientRect::new(
             mon.x + main_width as i16,
             mon.y + (i as u16 * stack_client_height) as i16,
-            mon.width - main_width - (bw * 2),
-            stack_client_height - (bw * 2),
+            mon.width - main_width - (CLIENT_BORDER_WIDTH * 2),
+            stack_client_height - (CLIENT_BORDER_WIDTH * 2),
         ));
     }
 
@@ -65,10 +62,8 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
 }
 
 fn col(mon: &WMonitor, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
-    let c = clients[0].borrow();
-    let bw = c.border_width;
     if clients.len() == 1 {
-        return single_client(mon, &c);
+        return single_client(mon);
     }
     let mut rects = vec![];
     let client_width = mon.width / clients.len() as u16;
@@ -76,18 +71,18 @@ fn col(mon: &WMonitor, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
         rects.push(ClientRect::new(
             mon.x + (i as i16 * client_width as i16),
             mon.y,
-            mon.width - client_width - (bw * 2),
-            mon.height - (bw * 2),
+            mon.width - client_width - (CLIENT_BORDER_WIDTH * 2),
+            mon.height - (CLIENT_BORDER_WIDTH * 2),
         ));
     }
     rects
 }
 
-fn single_client(mon: &WMonitor, c: &WClientState) -> Vec<ClientRect> {
+fn single_client(mon: &WMonitor) -> Vec<ClientRect> {
     vec![ClientRect::new(
         mon.x,
         mon.y,
-        mon.width - c.border_width * 2,
-        mon.height - c.border_width * 2,
+        mon.width - CLIENT_BORDER_WIDTH * 2,
+        mon.height - CLIENT_BORDER_WIDTH * 2,
     )]
 }

@@ -7,6 +7,7 @@ pub mod workspaces {
     pub const WORKSPACE_CAP: usize = 9;
     pub const MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
     pub const WIDTH_ADJUSTMENT_FACTOR: f32 = 0.02;
+    pub const CLIENT_BORDER_WIDTH: u16 = 1;
 }
 
 pub mod mouse {

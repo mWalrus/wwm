@@ -37,12 +37,16 @@ impl From<&MonitorInfo> for WMonitor {
 }
 
 impl WMonitor {
-    pub fn next_workspace(&mut self, dir: StackDirection) -> Rc<RefCell<WWorkspace>> {
-        match dir {
-            StackDirection::Prev => self.workspaces.prev_index(true, true).unwrap(),
-            StackDirection::Next => self.workspaces.next_index(true, true).unwrap(),
-        };
-        self.focused_workspace()
+    pub fn client_height(&self, client_count: usize) -> u16 {
+        self.height / client_count as u16
+    }
+
+    pub fn focus_workspace_from_index(&mut self, idx: usize) -> Result<(), StateError> {
+        self.workspaces.select(idx)
+    }
+
+    pub fn focused_workspace(&self) -> Rc<RefCell<WWorkspace>> {
+        self.workspaces.selected().unwrap()
     }
 
     pub fn has_pointer(&self, e: &MotionNotifyEvent) -> bool {
@@ -55,19 +59,15 @@ impl WMonitor {
         self.workspaces.index() == idx
     }
 
-    pub fn focus_workspace_from_index(&mut self, idx: usize) -> Result<(), StateError> {
-        self.workspaces.select(idx)
-    }
-
-    pub fn focused_workspace(&self) -> Rc<RefCell<WWorkspace>> {
-        self.workspaces.selected().unwrap()
+    pub fn next_workspace(&mut self, dir: StackDirection) -> Rc<RefCell<WWorkspace>> {
+        match dir {
+            StackDirection::Prev => self.workspaces.prev_index(true, true).unwrap(),
+            StackDirection::Next => self.workspaces.next_index(true, true).unwrap(),
+        };
+        self.focused_workspace()
     }
 
     pub fn width_from_percentage(&self, p: f32) -> u16 {
         (self.width as f32 * p) as u16
-    }
-
-    pub fn client_height(&self, client_count: usize) -> u16 {
-        self.height / client_count as u16
     }
 }

@@ -25,8 +25,7 @@ impl WKeyboard {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         conn.prefetch_extension_information(xkb::X11_EXTENSION_NAME)?;
 
-        let xkb = conn.xkb_use_extension(1, 0)?;
-        let xkb = xkb.reply()?;
+        let xkb = conn.xkb_use_extension(1, 0)?.reply()?;
         assert!(xkb.supported);
 
         let events = xkb::EventType::NEW_KEYBOARD_NOTIFY
@@ -135,6 +134,7 @@ impl WKeyboard {
         let level = self
             .state
             .key_get_level(detail, self.state.key_get_layout(detail));
+        // FIXME: is this valid?
         self.state.key_get_one_sym(detail) + (level * 32)
     }
 }

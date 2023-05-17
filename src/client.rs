@@ -57,7 +57,6 @@ impl ClientRect {
 pub struct WClientState {
     pub window: Window,
     pub rect: ClientRect,
-    pub border_width: u16,
     pub is_floating: bool,
 }
 
@@ -66,7 +65,6 @@ impl WClientState {
         Self {
             window,
             rect: geom.into(),
-            border_width: 1,
             is_floating,
         }
     }

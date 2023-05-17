@@ -1,7 +1,10 @@
 # WWM: Wally's Window Manager
 
 ## Screenshots
+__Tiling layout__:
 ![tiling layout](./screenshots/screenshot-1.png)
+
+__Column layout__:
 ![column layout](./screenshots/screenshot-2.png)
 
 ## Development

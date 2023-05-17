@@ -50,6 +50,17 @@ enum WindowState {
     Iconic,
 }
 
+#[repr(u8)]
+enum NotifyMode {
+    Normal,
+    Inferior,
+    NotifyNonlinear,
+    NotifyNonlinearVirtual,
+    NotifyPointer,
+    NotifyPointerRoot,
+    NotifyDetailNone,
+}
+
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
@@ -403,13 +414,19 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn handle_map_request(&mut self, evt: MapRequestEvent) -> Result<(), ReplyOrIdError> {
         println!("got map request: {evt:#?}");
         let wa = self.conn.get_window_attributes(evt.window)?;
-        if let Ok(wa) = wa.reply() {
-            if wa.override_redirect {
-                return Ok(());
-            }
-        } else {
+        match wa.reply() {
+            Ok(wa) if wa.override_redirect => return Ok(()),
+            Err(e) => return Err(e)?,
+            Ok(_) => {}
+        }
+
+        if self.for_all_clients(|c| {
+            let c = c.borrow();
+            c.frame == evt.window || c.window == evt.window
+        }) {
             return Ok(());
         }
+
         self.manage_window(evt.window, &self.conn.get_geometry(evt.window)?.reply()?)
     }
 
@@ -439,14 +456,31 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyOrIdError> {
-        // println!("got enter event: {evt:#?}");
+        println!("got enter event: {evt:#?}");
         // FIXME: maybe there's a better way?
         if self.ignore_enter {
             self.ignore_enter = false;
             return Ok(());
         }
 
+        let mode = u8::from(evt.mode);
+        let detail = u8::from(evt.detail);
         let entered_win = evt.event;
+
+        if (mode != NotifyMode::Normal as u8 || detail == NotifyMode::Inferior as u8)
+            && entered_win != self.screen.root
+        {
+            return Ok(());
+        }
+
+        if !self.for_all_clients(|c| {
+            let c = c.borrow();
+            let c_has_window = c.frame == entered_win || c.window == entered_win;
+            println!("client has window: {c_has_window}");
+            c_has_window
+        }) {
+            return Ok(());
+        }
 
         let (frame, window) = {
             if let Some(client) = &self.focused_client {

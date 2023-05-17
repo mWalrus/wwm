@@ -1,7 +1,8 @@
 # WWM: Wally's Window Manager
 
 ## Screenshots
-![screenshot 1](./screenshots/screenshot-1.png)
+![tiling layout](./screenshots/screenshot-1.png)
+![column layout](./screenshots/screenshot-2.png)
 
 ## Development
 1. On Linux you can enter another session using `Ctrl+Alt+F{3,4,5,...}`.

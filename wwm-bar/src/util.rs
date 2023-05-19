@@ -1,4 +1,4 @@
-use x11rb::protocol::xproto::Rectangle;
+use x11rb::protocol::{render::Color, xproto::Rectangle};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
@@ -28,5 +28,18 @@ impl From<Rect> for Rectangle {
 impl From<Rectangle> for Rect {
     fn from(r: Rectangle) -> Self {
         Rect::new(r.x, r.y, r.width, r.height)
+    }
+}
+
+pub fn hex_to_rgba_color(hex: u32) -> Color {
+    let red = ((hex >> 16 & 0xff) as u16) << 8;
+    let green = ((hex >> 8 & 0xff) as u16) << 8;
+    let blue = ((hex & 0xff) as u16) << 8;
+
+    Color {
+        red,
+        green,
+        blue,
+        alpha: 0xffff,
     }
 }

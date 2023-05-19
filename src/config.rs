@@ -6,8 +6,9 @@ pub mod theme {
     }
 
     pub mod bar {
-        pub const BG_HIGHLIGHTED: u32 = 0xca9ee6;
-        pub const BG: u32 = 0x51576d;
+        pub const BG_SELECTED: u32 = 0xca9ee6;
+        pub const BG: u32 = 0x232634;
+        pub const FG_SELECTED: u32 = 0x232634;
         pub const FG: u32 = 0xc6d0f5;
         pub const FONT_SIZE: f32 = 13.;
         pub const PADDING: u16 = 5;

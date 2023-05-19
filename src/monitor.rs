@@ -31,7 +31,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         mi: &MonitorInfo,
         conn: &'a C,
         font_drawer: Rc<FontDrawer>,
-        vis_info: &RenderVisualInfo,
+        vis_info: Rc<RenderVisualInfo>,
     ) -> Self {
         let mut workspaces = Vec::with_capacity(WORKSPACE_CAP);
         for _ in 0..WORKSPACE_CAP {
@@ -58,10 +58,13 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             WORKSPACE_CAP,
             layout_symbol,
             "",
-            [theme::bar::FG, theme::bar::BG, theme::bar::BG_HIGHLIGHTED],
+            [
+                theme::bar::FG,
+                theme::bar::BG,
+                theme::bar::BG_SELECTED,
+                theme::bar::FG_SELECTED,
+            ],
         );
-
-        bar.draw(conn);
 
         Self {
             conn,

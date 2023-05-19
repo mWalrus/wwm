@@ -35,8 +35,8 @@ use x11rb::{
             ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
             ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, DestroyNotifyEvent,
             EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, InputFocus, KeyPressEvent,
-            MapRequestEvent, MapState, MotionNotifyEvent, PropMode, Screen, SetMode, StackMode,
-            UnmapNotifyEvent, Window,
+            MapRequestEvent, MapState, MotionNotifyEvent, PropMode, PropertyNotifyEvent, Screen,
+            SetMode, StackMode, UnmapNotifyEvent, Window,
         },
         ErrorKind, Event,
     },
@@ -99,7 +99,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::become_wm(conn, screen_num, screen).unwrap();
         Self::run_auto_start_commands().unwrap();
 
-        let vis_info = RenderVisualInfo::new(conn, &screen).unwrap();
+        let vis_info = Rc::new(RenderVisualInfo::new(conn, &screen).unwrap());
         let font = LoadedFont::new(conn, vis_info.render.pict_format).unwrap();
         let font_drawer = Rc::new(FontDrawer::new(font));
 
@@ -146,6 +146,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
             while let Ok(event) = self.conn.wait_for_event() {
                 if self.handle_event(event)? == ShouldExit::Yes {
                     break 'eventloop;
+                }
+
+                for m in self.monitors.inner().iter() {
+                    m.borrow_mut().bar.draw(self.conn);
                 }
             }
         }
@@ -253,6 +257,26 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
     }
 
+    fn get_window_title(&self, window: Window) -> Result<String, ReplyOrIdError> {
+        let reply = self
+            .conn
+            .get_property(
+                false,
+                window,
+                self.atoms._NET_WM_NAME,
+                self.atoms.UTF8_STRING,
+                0,
+                8,
+            )?
+            .reply()?;
+        if let Some(text) = reply.value8() {
+            let text: Vec<u8> = text.collect();
+            println!("name bytes: {text:#?}");
+            return Ok(String::from_utf8(text).unwrap());
+        }
+        return Ok(String::new());
+    }
+
     fn focus(&mut self) -> Result<(), ReplyOrIdError> {
         let ws = self.focused_workspace.borrow();
         self.focused_client = ws.focused_client();
@@ -260,6 +284,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let win = {
             if let Some(client) = &self.focused_client {
                 let c = client.borrow();
+                let name = self.get_window_title(c.window)?;
+                self.focused_monitor
+                    .borrow_mut()
+                    .bar
+                    .update_title(self.conn, name);
                 c.window
             } else {
                 return Ok(());
@@ -348,14 +377,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
         conn: &'a C,
         screen: &Screen,
         font_drawer: &Rc<FontDrawer>,
-        vis_info: &RenderVisualInfo,
+        vis_info: &Rc<RenderVisualInfo>,
     ) -> Result<Vec<WMonitor<'a, C>>, ReplyError> {
         let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
         conn.flush()?;
         let monitors: Vec<WMonitor<C>> = monitors
             .monitors
             .iter()
-            .map(|m| WMonitor::new(m, conn, Rc::clone(font_drawer), vis_info))
+            .map(|m| WMonitor::new(m, conn, Rc::clone(font_drawer), Rc::clone(vis_info)))
             .collect();
         Ok(monitors)
     }
@@ -460,6 +489,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
             Event::KeyPress(e) => self.handle_key_press(e)?,
             Event::XkbStateNotify(e) => self.handle_xkb_state_notify(e)?,
+            Event::PropertyNotify(e) => self.handle_property_notify(e)?,
             Event::Error(e) => eprintln!("ERROR: {e:#?}"),
             _ => {}
         }
@@ -549,6 +579,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let (x, y) = (x as i32, y as i32);
             self.conn
                 .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+        }
+        Ok(())
+    }
+
+    fn handle_property_notify(&mut self, evt: PropertyNotifyEvent) -> Result<(), ReplyOrIdError> {
+        if evt.atom == self.atoms._NET_WM_NAME {
+            let title = self.get_window_title(evt.window)?;
+            self.focused_monitor
+                .borrow_mut()
+                .bar
+                .update_title(self.conn, title);
         }
         Ok(())
     }
@@ -766,7 +807,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let mut m = self.focused_monitor.borrow_mut();
             m.focus_workspace_from_index(idx).unwrap();
             self.focused_workspace = m.focused_workspace();
-            self.focused_client = self.focused_workspace.borrow().focused_client();
+            let ws = self.focused_workspace.borrow();
+            self.focused_client = ws.focused_client();
+            m.bar.update_tags(idx);
+            m.bar.update_layout_symbol(self.conn, ws.layout.to_string());
+            let title = if let Some(c) = &self.focused_client {
+                self.get_window_title(c.borrow().window)?
+            } else {
+                String::new()
+            };
+            m.bar.update_title(self.conn, title);
         }
 
         self.recompute_layout()?;
@@ -831,7 +881,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
             self.conn.flush()?;
+
+            self.focused_monitor
+                .borrow_mut()
+                .bar
+                .update_title(self.conn, "");
         }
+
         self.focused_client = None;
         Ok(())
     }
@@ -874,6 +930,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn update_workspace_layout(&mut self, layout: WLayout) {
         if self.focused_workspace.borrow_mut().set_layout(layout) {
+            self.focused_monitor.borrow_mut().bar.update_layout_symbol(
+                self.conn,
+                self.focused_workspace.borrow().layout.to_string(),
+            );
             self.recompute_layout().unwrap();
         }
     }

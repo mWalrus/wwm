@@ -13,7 +13,10 @@ use x11rb::{
     xcb_ffi::ConnectionError,
 };
 
-use crate::{util::Rect, WWorkspaceTag};
+use crate::{
+    util::{hex_to_rgba_color, Rect},
+    WWorkspaceTag,
+};
 
 #[derive(Error, Debug)]
 pub enum DrawerError {
@@ -33,42 +36,33 @@ impl FontDrawer {
     pub fn draw<C: Connection>(
         &self,
         conn: &C,
-        tag: &WWorkspaceTag,
+        // tag: &WWorkspaceTag,
+        rect: Rect,
+        text: &RenderString,
         dst: Picture,
+        bg: Color,
+        fg: Color,
     ) -> Result<(), DrawerError> {
-        let Rect { x, y, w, h } = tag.rect;
-        let fg_fill_area: Rectangle = Rect::new(0, 0, w, h).into();
-        // let bg_fill_area: Rectangle = Rect::new(0, y, w, h).into();
+        let Rect { x, y, w, h } = rect;
+        let fg_fill_area: Rectangle = Rect::new(0, y, w, h).into();
+        let bg_fill_area: Rectangle = rect.into();
 
-        let bg = Color {
-            red: 0x0000,
-            green: 0x0000,
-            blue: 0x0000,
-            alpha: 0xffff,
-        };
-
-        let fg = Color {
-            red: 0xffff,
-            green: 0xffff,
-            blue: 0xffff,
-            alpha: 0xffff,
-        };
-
-        conn.render_fill_rectangles(PictOp::SRC, tag.picture, fg, &[fg_fill_area])?;
-        // conn.render_fill_rectangles(PictOp::OVER, dst, bg, &[bg_fill_area])?;
+        conn.render_fill_rectangles(PictOp::SRC, text.picture, fg, &[fg_fill_area])?;
+        conn.render_fill_rectangles(PictOp::SRC, dst, bg, &[bg_fill_area])?;
 
         // let mut offset_x = tag.text.hpad as i16;
-        for chunk in &tag.text.chunks {
+        let mut x_offset = x + text.horizontal_padding as i16;
+        for chunk in &text.chunks {
             self.draw_glyphs(
                 conn,
-                (x + tag.text.hpad as i16, y),
+                (x_offset, y),
                 chunk.glyph_set,
-                tag.picture,
+                text.picture,
                 dst,
                 &chunk.glyph_ids,
             )?;
 
-            // offset_x += chunk.width;
+            x_offset += chunk.width;
         }
 
         Ok(())

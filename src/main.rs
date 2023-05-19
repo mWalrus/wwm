@@ -15,6 +15,7 @@ use x11rb::xcb_ffi::XCBConnection;
 
 atom_manager! {
     pub AtomCollection: AtomCollectionsCookie {
+        UTF8_STRING,
         WM_PROTOCOLS,
         WM_DELETE_WINDOW,
         WM_STATE,
@@ -23,6 +24,7 @@ atom_manager! {
         ATOM,
         ATOM_ATOM,
         WINDOW,
+        _NET_WM_NAME,
         _NET_SUPPORTED,
         _NET_CLIENT_LIST,
         _NET_CLIENT_INFO,

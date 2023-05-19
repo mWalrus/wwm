@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::client::WClientState;
+use crate::{client::WClientState, config};
 
 pub type ClientCell = Rc<RefCell<WClientState>>;
 
@@ -13,12 +13,12 @@ pub enum StateError {
 }
 
 #[derive(Default, Debug)]
-pub struct WVec<T: Default> {
+pub struct WVec<T> {
     inner: Vec<Rc<RefCell<T>>>,
     index: usize,
 }
 
-impl<T: Default> From<Vec<T>> for WVec<T> {
+impl<T> From<Vec<T>> for WVec<T> {
     fn from(v: Vec<T>) -> Self {
         Self {
             inner: v.into_iter().map(|t| Rc::new(RefCell::new(t))).collect(),
@@ -27,7 +27,7 @@ impl<T: Default> From<Vec<T>> for WVec<T> {
     }
 }
 
-impl<T: Default> WVec<T> {
+impl<T> WVec<T> {
     pub fn new(inner: Vec<T>, start_index: usize) -> Self {
         Self {
             inner: inner
@@ -223,4 +223,8 @@ pub fn cmd_bits(cmd: &'static [&'static str]) -> Option<(&'static str, &'static 
 
     let (cmd, args) = cmd.split_at(1);
     Some((cmd[0], args))
+}
+
+pub const fn bar_height() -> u16 {
+    config::theme::bar::FONT_SIZE as u16 + (config::theme::bar::PADDING * 2)
 }

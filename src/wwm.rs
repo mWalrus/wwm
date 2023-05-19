@@ -1,10 +1,8 @@
 use crate::{
     client::WClientState,
     config::{
-        auto_start::AUTO_START_COMMANDS,
-        mouse::DRAG_BUTTON,
-        theme,
-        workspaces::{CLIENT_BORDER_WIDTH, WIDTH_ADJUSTMENT_FACTOR},
+        auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme,
+        workspaces::WIDTH_ADJUSTMENT_FACTOR,
     },
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
@@ -22,6 +20,10 @@ use std::{
     sync::Arc,
     thread,
     time::Duration,
+};
+use wwm_bar::{
+    font::{loader::LoadedFont, FontDrawer},
+    visual::RenderVisualInfo,
 };
 use x11rb::{
     connection::Connection,
@@ -65,8 +67,9 @@ enum NotifyMode {
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
-    monitors: WVec<WMonitor>,
-    focused_monitor: Rc<RefCell<WMonitor>>,
+    font_drawer: Rc<FontDrawer>,
+    monitors: WVec<WMonitor<'a, C>>,
+    focused_monitor: Rc<RefCell<WMonitor<'a, C>>>,
     focused_workspace: Rc<RefCell<WWorkspace>>,
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
@@ -96,7 +99,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::become_wm(conn, screen_num, screen).unwrap();
         Self::run_auto_start_commands().unwrap();
 
-        let mut monitors: WVec<WMonitor> = Self::get_monitors(conn, screen).unwrap().into();
+        let vis_info = RenderVisualInfo::new(conn, &screen).unwrap();
+        let font = LoadedFont::new(conn, vis_info.render.pict_format).unwrap();
+        let font_drawer = Rc::new(FontDrawer::new(font));
+
+        let mut monitors: WVec<WMonitor<'a, C>> =
+            Self::get_monitors(conn, screen, &font_drawer, &vis_info)
+                .unwrap()
+                .into();
 
         monitors.find_and_select(|m| m.borrow().primary);
         let focused_monitor = monitors.selected().unwrap();
@@ -109,6 +119,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let mut wwm = Self {
             conn,
             screen,
+            font_drawer,
             monitors,
             focused_monitor,
             focused_workspace,
@@ -269,7 +280,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             &win.to_ne_bytes(),
         )?;
 
-        let focus_aux = ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_FOCUSED);
+        let focus_aux =
+            ChangeWindowAttributesAux::new().border_pixel(theme::window::BORDER_FOCUSED);
         self.conn.change_window_attributes(win, &focus_aux)?;
 
         self.conn.flush()?;
@@ -332,10 +344,19 @@ impl<'a, C: Connection> WinMan<'a, C> {
         success
     }
 
-    fn get_monitors(conn: &'a C, screen: &Screen) -> Result<Vec<WMonitor>, ReplyError> {
+    fn get_monitors(
+        conn: &'a C,
+        screen: &Screen,
+        font_drawer: &Rc<FontDrawer>,
+        vis_info: &RenderVisualInfo,
+    ) -> Result<Vec<WMonitor<'a, C>>, ReplyError> {
         let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
         conn.flush()?;
-        let monitors: Vec<WMonitor> = monitors.monitors.iter().map(|m| m.into()).collect();
+        let monitors: Vec<WMonitor<C>> = monitors
+            .monitors
+            .iter()
+            .map(|m| WMonitor::new(m, conn, Rc::clone(font_drawer), vis_info))
+            .collect();
         Ok(monitors)
     }
 
@@ -590,7 +611,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         //     println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
         // }
 
-        let mut conf_aux = ConfigureWindowAux::new().border_width(CLIENT_BORDER_WIDTH as u32);
+        let mut conf_aux =
+            ConfigureWindowAux::new().border_width(theme::window::BORDER_WIDTH as u32);
 
         // make sure floating windows get mapped inside the current monitor's geometry
         if is_floating {
@@ -619,7 +641,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         let change_aux = ChangeWindowAttributesAux::new()
-            .border_pixel(theme::WINDOW_BORDER_UNFOCUSED)
+            .border_pixel(theme::window::BORDER_UNFOCUSED)
             .event_mask(
                 EventMask::ENTER_WINDOW
                     | EventMask::FOCUS_CHANGE
@@ -804,7 +826,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if let Some(client) = &self.focused_client {
             let c = client.borrow();
             let unfocus_aux =
-                ChangeWindowAttributesAux::new().border_pixel(theme::WINDOW_BORDER_UNFOCUSED);
+                ChangeWindowAttributesAux::new().border_pixel(theme::window::BORDER_UNFOCUSED);
             self.conn.change_window_attributes(c.window, &unfocus_aux)?;
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;

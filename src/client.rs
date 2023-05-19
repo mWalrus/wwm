@@ -1,4 +1,7 @@
-use x11rb::protocol::xproto::{ConfigureWindowAux, GetGeometryReply, Window};
+use x11rb::{
+    connection::Connection,
+    protocol::xproto::{ConfigureWindowAux, GetGeometryReply, Window},
+};
 
 use crate::monitor::WMonitor;
 
@@ -21,8 +24,8 @@ impl From<&GetGeometryReply> for ClientRect {
     }
 }
 
-impl From<&WMonitor> for ClientRect {
-    fn from(m: &WMonitor) -> Self {
+impl<'a, C: Connection> From<&WMonitor<'_, C>> for ClientRect {
+    fn from(m: &WMonitor<C>) -> Self {
         Self {
             x: m.x,
             y: m.y,

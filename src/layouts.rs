@@ -1,8 +1,12 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt};
+
+use x11rb::connection::Connection;
 
 use crate::{
-    client::ClientRect, config::workspaces::CLIENT_BORDER_WIDTH, monitor::WMonitor,
-    util::ClientCell,
+    client::ClientRect,
+    config::theme::window::BORDER_WIDTH,
+    monitor::WMonitor,
+    util::{bar_height, ClientCell},
 };
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
@@ -13,10 +17,21 @@ pub enum WLayout {
     Floating,
 }
 
-pub fn layout_clients(
+impl fmt::Display for WLayout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let symbol = match self {
+            WLayout::Tile => "[]=",
+            WLayout::Column => "|||",
+            WLayout::Floating => "   ",
+        };
+        write!(f, "{symbol}")
+    }
+}
+
+pub fn layout_clients<C: Connection>(
     layout: &WLayout,
     width_factor: f32,
-    monitor: &WMonitor,
+    monitor: &WMonitor<C>,
     clients: &Vec<&ClientCell>,
 ) -> Option<Vec<ClientRect>> {
     if clients.is_empty() {
@@ -32,7 +47,11 @@ pub fn layout_clients(
     Some(rects)
 }
 
-fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
+fn tile<C: Connection>(
+    mon: &WMonitor<C>,
+    width_factor: f32,
+    clients: &Vec<&ClientCell>,
+) -> Vec<ClientRect> {
     if clients.len() == 1 {
         return single_client(mon);
     }
@@ -44,8 +63,8 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
     rects.push(ClientRect::new(
         mon.x,
         mon.y,
-        main_width - CLIENT_BORDER_WIDTH * 2,
-        mon.height - CLIENT_BORDER_WIDTH * 2,
+        main_width - BORDER_WIDTH * 2,
+        mon.height - BORDER_WIDTH * 2,
     ));
 
     let non_main_window_count = clients.len() - 1;
@@ -56,12 +75,12 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
         let mut ch = non_main_height;
 
         if i == non_main_window_count - 1 {
-            let ctot = cy + ch as i16;
-            let mtot = mon.y + mon.height as i16;
+            let ctot = cy + ch as i16 - bar_height() as i16;
+            let mtot = mon.y + mon.height as i16 - bar_height() as i16;
 
             match ctot.cmp(&mtot) {
-                Ordering::Less => ch -= ctot.abs_diff(mtot),
-                Ordering::Greater => ch += ctot.abs_diff(mtot),
+                Ordering::Less => ch += ctot.abs_diff(mtot),
+                Ordering::Greater => ch -= ctot.abs_diff(mtot),
                 _ => {}
             }
         }
@@ -69,15 +88,15 @@ fn tile(mon: &WMonitor, width_factor: f32, clients: &Vec<&ClientCell>) -> Vec<Cl
         rects.push(ClientRect::new(
             mon.x + main_width as i16,
             cy,
-            mon.width - main_width - (CLIENT_BORDER_WIDTH * 2),
-            ch - (CLIENT_BORDER_WIDTH * 2),
+            mon.width - main_width - (BORDER_WIDTH * 2),
+            ch - (BORDER_WIDTH * 2),
         ));
     }
 
     rects
 }
 
-fn col(mon: &WMonitor, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
+fn col<C: Connection>(mon: &WMonitor<C>, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
     if clients.len() == 1 {
         return single_client(mon);
     }
@@ -87,18 +106,18 @@ fn col(mon: &WMonitor, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
         rects.push(ClientRect::new(
             mon.x + (i as i16 * client_width as i16),
             mon.y,
-            client_width - (CLIENT_BORDER_WIDTH * 2),
-            mon.height - (CLIENT_BORDER_WIDTH * 2),
+            client_width - (BORDER_WIDTH * 2),
+            mon.height - (BORDER_WIDTH * 2),
         ));
     }
     rects
 }
 
-fn single_client(mon: &WMonitor) -> Vec<ClientRect> {
+fn single_client<C: Connection>(mon: &WMonitor<C>) -> Vec<ClientRect> {
     vec![ClientRect::new(
         mon.x,
         mon.y,
-        mon.width - CLIENT_BORDER_WIDTH * 2,
-        mon.height - CLIENT_BORDER_WIDTH * 2,
+        mon.width - BORDER_WIDTH * 2,
+        mon.height - BORDER_WIDTH * 2,
     )]
 }

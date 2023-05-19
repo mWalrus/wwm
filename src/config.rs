@@ -1,13 +1,23 @@
 pub mod theme {
-    pub static WINDOW_BORDER_FOCUSED: u32 = 0xca9ee6;
-    pub static WINDOW_BORDER_UNFOCUSED: u32 = 0x51576d;
+    pub mod window {
+        pub const BORDER_FOCUSED: u32 = 0xca9ee6;
+        pub const BORDER_UNFOCUSED: u32 = 0x51576d;
+        pub const BORDER_WIDTH: u16 = 1;
+    }
+
+    pub mod bar {
+        pub const BG_HIGHLIGHTED: u32 = 0xca9ee6;
+        pub const BG: u32 = 0x51576d;
+        pub const FG: u32 = 0xc6d0f5;
+        pub const FONT_SIZE: f32 = 13.;
+        pub const PADDING: u16 = 5;
+    }
 }
 
 pub mod workspaces {
     pub const WORKSPACE_CAP: usize = 9;
     pub const MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
     pub const WIDTH_ADJUSTMENT_FACTOR: f32 = 0.02;
-    pub const CLIENT_BORDER_WIDTH: u16 = 1;
 }
 
 pub mod mouse {

@@ -1,15 +1,23 @@
 use std::{cell::RefCell, rc::Rc};
 
-use x11rb::protocol::{randr::MonitorInfo, xproto::MotionNotifyEvent};
+use wwm_bar::{font::FontDrawer, visual::RenderVisualInfo, WBar};
+use x11rb::{
+    connection::Connection,
+    protocol::{
+        randr::MonitorInfo,
+        xproto::{MotionNotifyEvent, Rectangle},
+    },
+};
 
 use crate::{
-    config::workspaces::WORKSPACE_CAP,
+    config::{theme, workspaces::WORKSPACE_CAP},
     util::{StateError, WVec},
     workspace::{StackDirection, WWorkspace},
 };
 
-#[derive(Default)]
-pub struct WMonitor {
+pub struct WMonitor<'a, C: Connection> {
+    pub conn: &'a C,
+    pub bar: WBar,
     pub primary: bool,
     pub x: i16,
     pub y: i16,
@@ -18,25 +26,55 @@ pub struct WMonitor {
     pub workspaces: WVec<WWorkspace>,
 }
 
-impl From<&MonitorInfo> for WMonitor {
-    fn from(mi: &MonitorInfo) -> Self {
+impl<'a, C: Connection> WMonitor<'a, C> {
+    pub fn new(
+        mi: &MonitorInfo,
+        conn: &'a C,
+        font_drawer: Rc<FontDrawer>,
+        vis_info: &RenderVisualInfo,
+    ) -> Self {
         let mut workspaces = Vec::with_capacity(WORKSPACE_CAP);
         for _ in 0..WORKSPACE_CAP {
             workspaces.push(WWorkspace::new());
         }
         let workspaces = WVec::new(workspaces, 0);
-        Self {
-            primary: mi.primary,
+        let layout_symbol = workspaces.selected().unwrap().borrow().layout.to_string();
+
+        let bar_rect = Rectangle {
             x: mi.x,
             y: mi.y,
             width: mi.width,
-            height: mi.height,
+            height: theme::bar::FONT_SIZE as u16 + theme::bar::PADDING,
+        };
+
+        let y = bar_rect.y + bar_rect.height as i16;
+        let height = mi.height - bar_rect.height;
+        let bar = WBar::new(
+            conn,
+            font_drawer,
+            vis_info,
+            bar_rect,
+            theme::bar::PADDING,
+            WORKSPACE_CAP,
+            layout_symbol,
+            "",
+            [theme::bar::FG, theme::bar::BG, theme::bar::BG_HIGHLIGHTED],
+        );
+
+        bar.draw(conn);
+
+        Self {
+            conn,
+            bar,
+            primary: mi.primary,
+            x: mi.x,
+            y,
+            width: mi.width,
+            height,
             workspaces,
         }
     }
-}
 
-impl WMonitor {
     pub fn client_height(&self, client_count: usize) -> u16 {
         self.height / client_count as u16
     }

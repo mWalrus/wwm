@@ -44,7 +44,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             x: mi.x,
             y: mi.y,
             width: mi.width,
-            height: theme::bar::FONT_SIZE as u16 + theme::bar::PADDING,
+            height: theme::bar::FONT_SIZE as u16 + (theme::bar::PADDING * 2),
         };
 
         let y = bar_rect.y + bar_rect.height as i16;

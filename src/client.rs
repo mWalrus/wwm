@@ -64,10 +64,10 @@ pub struct WClientState {
 }
 
 impl WClientState {
-    pub fn new(window: Window, geom: &GetGeometryReply, is_floating: bool) -> Self {
+    pub fn new(window: Window, rect: ClientRect, is_floating: bool) -> Self {
         Self {
             window,
-            rect: geom.into(),
+            rect,
             is_floating,
         }
     }

@@ -1,5 +1,5 @@
 use crate::{
-    client::WClientState,
+    client::{ClientRect, WClientState},
     config::{
         auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme,
         workspaces::WIDTH_ADJUSTMENT_FACTOR,
@@ -655,31 +655,28 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let mut conf_aux =
             ConfigureWindowAux::new().border_width(theme::window::BORDER_WIDTH as u32);
 
-        // make sure floating windows get mapped inside the current monitor's geometry
-        if is_floating {
-            let (mx, my, mw, mh) = {
-                let m = self.focused_monitor.borrow();
-                (m.x, m.y, m.width, m.height)
-            };
+        let (mx, my, mw, mh) = {
+            let m = self.focused_monitor.borrow();
+            (m.x, m.y, m.width, m.height)
+        };
 
-            let mut x = geom.x;
-            let mut y = geom.y;
+        let mut x = geom.x;
+        let mut y = geom.y;
 
-            if geom.x + geom.width as i16 > mx + mw as i16 {
-                x = mx + mw as i16 - geom.width as i16 - 2 // borders
-            }
-            if geom.y + geom.height as i16 > my + mh as i16 {
-                y = my + mh as i16 + geom.height as i16 - 2 // borders
-            }
-
-            x = x.max(mx);
-            y = y.max(my);
-
-            conf_aux = conf_aux
-                .stack_mode(StackMode::ABOVE)
-                .x(x as i32)
-                .y(y as i32);
+        if geom.x + geom.width as i16 > mx + mw as i16 {
+            x = mx + mw as i16 - geom.width as i16 - (theme::window::BORDER_WIDTH as i16 * 2)
         }
+        if geom.y + geom.height as i16 > my + mh as i16 {
+            y = my + mh as i16 + geom.height as i16 - (theme::window::BORDER_WIDTH as i16 * 2)
+        }
+
+        x = x.max(mx);
+        y = y.max(my);
+
+        conf_aux = conf_aux
+            .stack_mode(StackMode::ABOVE)
+            .x(x as i32)
+            .y(y as i32);
 
         let change_aux = ChangeWindowAttributesAux::new()
             .border_pixel(theme::window::BORDER_UNFOCUSED)
@@ -695,7 +692,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.focused_workspace
             .borrow_mut()
-            .push_client(WClientState::new(win, geom, is_floating));
+            .push_client(WClientState::new(
+                win,
+                ClientRect::new(x, y, geom.width, geom.height),
+                is_floating,
+            ));
         self.set_client_state(win, WindowState::Normal)?;
 
         self.recompute_layout()?;

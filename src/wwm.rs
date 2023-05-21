@@ -151,6 +151,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 for m in self.monitors.inner().iter() {
                     m.borrow_mut().bar.draw(self.conn);
                 }
+                self.conn.flush()?;
             }
         }
         Ok(())
@@ -211,8 +212,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         } else {
             self.conn.destroy_window(window)?;
         }
-
-        self.conn.flush()?;
 
         self.ignore_enter = true;
         Ok(())
@@ -313,7 +312,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             ChangeWindowAttributesAux::new().border_pixel(theme::window::BORDER_FOCUSED);
         self.conn.change_window_attributes(win, &focus_aux)?;
 
-        self.conn.flush()?;
         Ok(())
     }
 
@@ -380,7 +378,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         vis_info: &Rc<RenderVisualInfo>,
     ) -> Result<Vec<WMonitor<'a, C>>, ReplyError> {
         let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
-        conn.flush()?;
         let monitors: Vec<WMonitor<C>> = monitors
             .monitors
             .iter()
@@ -412,11 +409,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
-        let aux = ConfigureWindowAux::from_configure_request(&evt)
-            .sibling(None)
-            .stack_mode(None);
-        self.conn.configure_window(evt.window, &aux)?;
-        self.conn.flush()?;
+        if evt.window == self.screen.root {
+            let aux = ConfigureWindowAux::from_configure_request(&evt)
+                .sibling(None)
+                .stack_mode(None);
+            self.conn.configure_window(evt.window, &aux)?;
+        }
         Ok(())
     }
 
@@ -687,6 +685,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     | EventMask::STRUCTURE_NOTIFY,
             );
 
+        // FIXME: some clients dont want to be configured i guess!!!!!!!!! :D
         self.conn.configure_window(win, &conf_aux)?;
         self.conn.change_window_attributes(win, &change_aux)?;
 
@@ -756,7 +755,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
             self.conn.configure_window(c.window, &client_aux)?;
         }
-        self.conn.flush()?;
         Ok(())
     }
 
@@ -777,7 +775,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn scan_windows(&mut self) -> Result<(), ReplyOrIdError> {
         let tree_reply = self.conn.query_tree(self.screen.root)?.reply()?;
-        self.conn.flush()?;
 
         for win in tree_reply.children {
             let attr = self.conn.get_window_attributes(win)?;
@@ -849,7 +846,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             2,
             &[state as u8, 0],
         )?;
-        self.conn.flush()?;
         Ok(())
     }
 
@@ -881,7 +877,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.change_window_attributes(c.window, &unfocus_aux)?;
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
-            self.conn.flush()?;
 
             self.focused_monitor
                 .borrow_mut()
@@ -925,7 +920,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 .unwrap();
             true
         });
-        self.conn.flush()?;
         Ok(())
     }
 
@@ -956,7 +950,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 c.rect.width as i16 / 2,
                 c.rect.height as i16 / 2,
             )?;
-            self.conn.flush()?;
         }
         Ok(())
     }
@@ -973,7 +966,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             m.x + (m.width as i16 / 2),
             m.y + (m.height as i16 / 2),
         )?;
-        self.conn.flush()?;
         Ok(())
     }
 

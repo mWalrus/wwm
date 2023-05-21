@@ -67,6 +67,7 @@ enum NotifyMode {
 pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
+    #[allow(dead_code)]
     font_drawer: Rc<FontDrawer>,
     monitors: WVec<WMonitor<'a, C>>,
     focused_monitor: Rc<RefCell<WMonitor<'a, C>>>,
@@ -270,7 +271,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .reply()?;
         if let Some(text) = reply.value8() {
             let text: Vec<u8> = text.collect();
-            println!("name bytes: {text:#?}");
             return Ok(String::from_utf8(text).unwrap());
         }
         return Ok(String::new());
@@ -486,7 +486,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::ButtonRelease(e) => self.handle_button_release(e)?,
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
             Event::KeyPress(e) => self.handle_key_press(e)?,
-            Event::XkbStateNotify(e) => self.handle_xkb_state_notify(e)?,
             Event::PropertyNotify(e) => self.handle_property_notify(e)?,
             Event::Error(e) => eprintln!("ERROR: {e:#?}"),
             _ => {}
@@ -509,6 +508,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 break;
             }
         }
+        println!("got action: {action:?}");
 
         match action {
             WCommand::FocusClientPrev => self.focus_adjacent(StackDirection::Prev)?,
@@ -541,9 +541,31 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
             WCommand::Layout(layout) => self.update_workspace_layout(layout),
             WCommand::SelectWorkspace(idx) => self.select_workspace(idx).unwrap(),
+            WCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
             WCommand::Exit => self.try_exit(),
             WCommand::Idle => {}
         }
+        Ok(())
+    }
+
+    fn move_client_to_workspace(&mut self, ws_idx: usize) -> Result<(), ReplyOrIdError> {
+        if self.focused_client.is_none() {
+            return Ok(());
+        }
+
+        let focused_ws_idx = self.focused_monitor.borrow().workspaces.index();
+        if focused_ws_idx == ws_idx {
+            return Ok(());
+        }
+
+        self.unfocus()?;
+        if let Some(removed) = self.focused_workspace.borrow_mut().remove_focused() {
+            self.focused_monitor
+                .borrow_mut()
+                .add_client_to_workspace(ws_idx, removed);
+        }
+        self.recompute_layout()?;
+        self.focus()?;
         Ok(())
     }
 
@@ -750,12 +772,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn refresh(&mut self) {
-        // TODO: when the bar is implemented, we want to update the bar information here
-        todo!()
-    }
-
     fn run_auto_start_commands() -> Result<(), std::io::Error> {
         for cmd in AUTO_START_COMMANDS {
             if let Some((bin, args)) = util::cmd_bits(cmd) {
@@ -811,6 +827,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.recompute_layout()?;
 
+        self.focus()?;
         self.warp_pointer_to_focused_client()?;
 
         Ok(())

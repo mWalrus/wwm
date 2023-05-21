@@ -73,6 +73,16 @@ pub mod commands {
             WKeybind::new(MOD,         ks::KEY_7,      WCommand::SelectWorkspace(6)),
             WKeybind::new(MOD,         ks::KEY_8,      WCommand::SelectWorkspace(7)),
             WKeybind::new(MOD,         ks::KEY_9,      WCommand::SelectWorkspace(8)),
+            // move to workspace keybinds
+            WKeybind::new(MOD | SHIFT, ks::KEY_1,      WCommand::MoveClientToWorkspace(0)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_2,      WCommand::MoveClientToWorkspace(1)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_3,      WCommand::MoveClientToWorkspace(2)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_4,      WCommand::MoveClientToWorkspace(3)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_5,      WCommand::MoveClientToWorkspace(4)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_6,      WCommand::MoveClientToWorkspace(5)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_7,      WCommand::MoveClientToWorkspace(6)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_8,      WCommand::MoveClientToWorkspace(7)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_9,      WCommand::MoveClientToWorkspace(8)),
         ]
     }
 }

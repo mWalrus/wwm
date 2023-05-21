@@ -39,4 +39,5 @@ pub enum WCommand {
     Layout(WLayout),
     SelectWorkspace(usize),
     Spawn(&'static [&'static str]),
+    MoveClientToWorkspace(usize),
 }

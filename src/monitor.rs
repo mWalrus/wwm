@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
 
 use wwm_bar::{font::FontDrawer, visual::RenderVisualInfo, WBar};
 use x11rb::{
@@ -10,6 +10,7 @@ use x11rb::{
 };
 
 use crate::{
+    client::WClientState,
     config::{theme, workspaces::WORKSPACE_CAP},
     util::{StateError, WVec},
     workspace::{StackDirection, WWorkspace},
@@ -106,6 +107,14 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             StackDirection::Next => self.workspaces.next_index(true, true).unwrap(),
         };
         self.focused_workspace()
+    }
+
+    pub fn add_client_to_workspace(&mut self, ws_idx: usize, client: WClientState) {
+        if let Some(mut ws) = self.workspaces.get_mut(ws_idx) {
+            let ws = ws.borrow_mut();
+            ws.push_client(client);
+            ws.hide_clients(self.conn).unwrap();
+        }
     }
 
     pub fn width_from_percentage(&self, p: f32) -> u16 {

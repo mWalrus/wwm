@@ -1,4 +1,7 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{RefCell, RefMut},
+    rc::Rc,
+};
 
 use crate::{client::WClientState, config};
 
@@ -170,12 +173,26 @@ impl<T> WVec<T> {
         self.index = self.inner.len() - 1;
     }
 
-    pub fn remove_current(&mut self) {
+    pub fn remove_current(&mut self) -> Option<T> {
         if self.inner.is_empty() {
-            return;
+            return None;
         }
-        self.inner.remove(self.index);
+        let removed = self.inner.remove(self.index);
         self.check_bounds();
+
+        if let Ok(removed) = Rc::try_unwrap(removed) {
+            Some(removed.into_inner())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<RefMut<T>> {
+        if index >= self.inner.len() {
+            return None;
+        }
+
+        Some(self.inner[index].borrow_mut())
     }
 
     pub fn retain<F: FnMut(&Rc<RefCell<T>>) -> bool>(&mut self, p: F) {

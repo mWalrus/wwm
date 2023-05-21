@@ -86,7 +86,7 @@ impl WWorkspace {
         self.clients.push_and_select(c);
     }
 
-    pub fn remove_focused(&mut self) {
+    pub fn remove_focused(&mut self) -> Option<WClientState> {
         self.clients.remove_current()
     }
 

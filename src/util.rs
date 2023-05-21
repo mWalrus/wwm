@@ -1,5 +1,5 @@
 use std::{
-    cell::{RefCell, RefMut},
+    cell::{Ref, RefCell, RefMut},
     rc::Rc,
 };
 
@@ -8,6 +8,12 @@ use crate::{client::WClientState, config};
 pub type ClientCell = Rc<RefCell<WClientState>>;
 
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy)]
+pub enum StackDirection {
+    Prev,
+    Next,
+}
 
 #[derive(Error, Debug)]
 pub enum StateError {
@@ -193,6 +199,14 @@ impl<T> WVec<T> {
         }
 
         Some(self.inner[index].borrow_mut())
+    }
+
+    pub fn get(&mut self, index: usize) -> Option<Rc<RefCell<T>>> {
+        if index >= self.inner.len() {
+            return None;
+        }
+
+        Some(Rc::clone(&self.inner[index]))
     }
 
     pub fn retain<F: FnMut(&Rc<RefCell<T>>) -> bool>(&mut self, p: F) {

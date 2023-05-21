@@ -7,8 +7,8 @@ use crate::{
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
-    util::{self, ClientCell, WVec},
-    workspace::{StackDirection, WWorkspace},
+    util::{self, ClientCell, StackDirection, WVec},
+    workspace::WWorkspace,
     AtomCollection,
 };
 use std::{
@@ -30,7 +30,6 @@ use x11rb::{
     cursor::Handle as CursorHandle,
     protocol::{
         randr::ConnectionExt as _,
-        xkb::StateNotifyEvent,
         xproto::{
             ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
             ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, DestroyNotifyEvent,
@@ -527,7 +526,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     }
                     ws.width_factor += WIDTH_ADJUSTMENT_FACTOR;
                 }
-                self.recompute_layout()?;
+                self.recompute_layout(&self.focused_monitor)?;
             }
             WCommand::DecreaseMainWidth => {
                 {
@@ -537,14 +536,46 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     }
                     ws.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
                 }
-                self.recompute_layout()?;
+                self.recompute_layout(&self.focused_monitor)?;
             }
             WCommand::Layout(layout) => self.update_workspace_layout(layout),
             WCommand::SelectWorkspace(idx) => self.select_workspace(idx).unwrap(),
             WCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
+            WCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
             WCommand::Exit => self.try_exit(),
             WCommand::Idle => {}
         }
+        Ok(())
+    }
+
+    fn move_client_to_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
+        if self.focused_client.is_none() {
+            return Ok(());
+        }
+        let idx = match dir {
+            StackDirection::Prev => self.monitors.prev_index(true, false).unwrap(),
+            StackDirection::Next => self.monitors.next_index(true, false).unwrap(),
+        };
+
+        if idx == self.monitors.index() {
+            return Ok(());
+        }
+
+        self.unfocus()?;
+
+        if let Some(removed) = self.focused_workspace.borrow_mut().remove_focused() {
+            let mut m = self.monitors.get_mut(idx).unwrap();
+            let ws_idx = m.workspaces.index();
+
+            m.add_client_to_workspace(ws_idx, removed);
+        }
+
+        let rc = self.monitors.get(idx).unwrap();
+        self.recompute_layout(&rc)?;
+        self.recompute_layout(&self.focused_monitor)?;
+
+        self.focus()?;
+        self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
@@ -564,7 +595,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 .borrow_mut()
                 .add_client_to_workspace(ws_idx, removed);
         }
-        self.recompute_layout()?;
+        self.recompute_layout(&self.focused_monitor)?;
         self.focus()?;
         Ok(())
     }
@@ -712,7 +743,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             ));
         self.set_client_state(win, WindowState::Normal)?;
 
-        self.recompute_layout()?;
+        self.recompute_layout(&self.focused_monitor)?;
         self.conn.map_window(win)?;
         self.update_client_list()?;
 
@@ -732,15 +763,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let focused_client = self.focused_workspace.borrow().focused_client();
         if focused_client.is_some() {
             self.ignore_enter = true;
-            self.recompute_layout()?;
+            self.recompute_layout(&self.focused_monitor)?;
         }
         self.focused_client = focused_client;
         self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
-    fn recompute_layout(&mut self) -> Result<(), ReplyOrIdError> {
-        let ws = self.focused_workspace.borrow();
+    fn recompute_layout(&self, mon: &Rc<RefCell<WMonitor<C>>>) -> Result<(), ReplyOrIdError> {
+        let mon = mon.borrow();
+        let ws = mon.focused_workspace();
+        let ws = ws.borrow();
         let non_floating_clients = ws
             .clients
             .inner()
@@ -748,12 +781,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .filter(|c| !c.borrow().is_floating)
             .collect();
 
-        let rects = layout_clients(
-            &ws.layout,
-            ws.width_factor,
-            &self.focused_monitor.borrow(),
-            &non_floating_clients,
-        );
+        let rects = layout_clients(&ws.layout, ws.width_factor, &mon, &non_floating_clients);
 
         if rects.is_none() {
             return Ok(());
@@ -825,7 +853,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             m.bar.update_title(self.conn, title);
         }
 
-        self.recompute_layout()?;
+        self.recompute_layout(&self.focused_monitor)?;
 
         self.focus()?;
         self.warp_pointer_to_focused_client()?;
@@ -907,7 +935,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
         self.focus()?;
         self.update_client_list()?;
-        self.recompute_layout()?;
+        self.recompute_layout(&self.focused_monitor)?;
         self.warp_pointer_to_focused_client()?;
         Ok(())
     }
@@ -938,7 +966,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 self.conn,
                 self.focused_workspace.borrow().layout.to_string(),
             );
-            self.recompute_layout().unwrap();
+            self.recompute_layout(&self.focused_monitor).unwrap();
         }
     }
 

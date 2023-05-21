@@ -8,7 +8,7 @@ use crate::{
     client::WClientState,
     config::workspaces::MAIN_CLIENT_WIDTH_PERCENTAGE,
     layouts::WLayout,
-    util::{ClientCell, WVec},
+    util::{ClientCell, StackDirection, WVec},
 };
 
 #[derive(Default, Debug)]
@@ -16,11 +16,6 @@ pub struct WWorkspace {
     pub clients: WVec<WClientState>,
     pub width_factor: f32,
     pub layout: WLayout,
-}
-
-pub enum StackDirection {
-    Prev,
-    Next,
 }
 
 impl WWorkspace {

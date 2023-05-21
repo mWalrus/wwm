@@ -12,8 +12,8 @@ use x11rb::{
 use crate::{
     client::WClientState,
     config::{theme, workspaces::WORKSPACE_CAP},
-    util::{StateError, WVec},
-    workspace::{StackDirection, WWorkspace},
+    util::{StackDirection, StateError, WVec},
+    workspace::WWorkspace,
 };
 
 pub struct WMonitor<'a, C: Connection> {

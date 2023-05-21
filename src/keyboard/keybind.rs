@@ -1,6 +1,6 @@
 use x11rb::protocol::xproto::{KeyButMask, ModMask};
 
-use crate::layouts::WLayout;
+use crate::{layouts::WLayout, util::StackDirection};
 
 #[derive(Debug)]
 pub struct WKeybind {
@@ -40,4 +40,5 @@ pub enum WCommand {
     SelectWorkspace(usize),
     Spawn(&'static [&'static str]),
     MoveClientToWorkspace(usize),
+    MoveClientToMonitor(StackDirection),
 }

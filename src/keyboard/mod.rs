@@ -4,8 +4,8 @@ use x11rb::connection::RequestConnection;
 use x11rb::protocol::xkb::{self, ConnectionExt as _, StateNotifyEvent};
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask, Screen};
 use xcb::x::{Keysym, GRAB_ANY};
-use xkbcommon::xkb::State as KBState;
-use xkbcommon::xkb::{self as xkbc, KEY_Num_Lock};
+use xkbcommon::xkb::{self as xkbc, KEY_Num_Lock, KEY_Shift_L};
+use xkbcommon::xkb::{State as KBState, KEY_F11};
 
 use crate::config::commands;
 
@@ -97,6 +97,7 @@ impl WKeyboard {
 
             for keybind in &keybinds {
                 if syms.contains(&keybind.keysym) {
+                    println!("GRAB: {keybind:#x?}");
                     for m in &modifiers {
                         conn.grab_key(
                             true,
@@ -118,23 +119,7 @@ impl WKeyboard {
         })
     }
 
-    pub fn update_state_mask(&mut self, evt: StateNotifyEvent) {
-        self.state.update_mask(
-            evt.base_mods.into(),
-            evt.latched_mods.into(),
-            evt.locked_mods.into(),
-            evt.base_group.try_into().unwrap(),
-            evt.latched_group.try_into().unwrap(),
-            evt.locked_group.into(),
-        );
-    }
-
-    pub fn key_sym(&self, detail: u32) -> Keysym {
-        // we adjust for shift level here
-        let level = self
-            .state
-            .key_get_level(detail, self.state.key_get_layout(detail));
-        // FIXME: is this valid?
-        self.state.key_get_one_sym(detail) + (level * 32)
+    pub fn key_sym(&mut self, detail: u32) -> Keysym {
+        self.state.key_get_one_sym(detail)
     }
 }

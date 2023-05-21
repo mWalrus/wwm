@@ -599,13 +599,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn handle_xkb_state_notify(&mut self, evt: StateNotifyEvent) -> Result<(), ReplyOrIdError> {
-        if i32::try_from(evt.device_id).unwrap() == self.keyboard.device_id {
-            self.keyboard.update_state_mask(evt);
-        }
-        Ok(())
-    }
-
     fn manage_window(
         &mut self,
         win: Window,
@@ -685,7 +678,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     | EventMask::STRUCTURE_NOTIFY,
             );
 
-        // FIXME: some clients dont want to be configured i guess!!!!!!!!! :D
         self.conn.configure_window(win, &conf_aux)?;
         self.conn.change_window_attributes(win, &change_aux)?;
 

@@ -7,7 +7,7 @@ use crate::{
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
-    util::{self, ClientCell, StackDirection, WVec},
+    util::{self, ClientCell, WDirection, WVec},
     workspace::WWorkspace,
     AtomCollection,
 };
@@ -315,7 +315,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn focus_adjacent(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
+    fn focus_adjacent(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
         self.unfocus()?;
         {
             self.focused_workspace.borrow_mut().focus_neighbor(dir);
@@ -325,12 +325,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn focus_adjacent_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
+    fn focus_adjacent_monitor(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
         self.unfocus()?;
 
         match dir {
-            StackDirection::Prev => self.monitors.prev_index(true, true),
-            StackDirection::Next => self.monitors.next_index(true, true),
+            WDirection::Prev => self.monitors.prev_index(true, true),
+            WDirection::Next => self.monitors.next_index(true, true),
         };
 
         let mon = self.monitors.selected().unwrap();
@@ -511,34 +511,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         println!("got action: {action:?}");
 
         match action {
-            WCommand::FocusClientPrev => self.focus_adjacent(StackDirection::Prev)?,
-            WCommand::FocusClientNext => self.focus_adjacent(StackDirection::Next)?,
-            WCommand::MoveClientPrev => self.move_adjacent(StackDirection::Prev)?,
-            WCommand::MoveClientNext => self.move_adjacent(StackDirection::Next)?,
-            WCommand::FocusMonitorNext => self.focus_adjacent_monitor(StackDirection::Next)?,
-            WCommand::FocusMonitorPrev => self.focus_adjacent_monitor(StackDirection::Prev)?,
+            WCommand::FocusClient(dir) => self.focus_adjacent(dir)?,
+            WCommand::MoveClient(dir) => self.move_adjacent(dir)?,
+            WCommand::FocusMonitor(dir) => self.focus_adjacent_monitor(dir)?,
             WCommand::Spawn(cmd) => self.spawn_program(cmd),
             WCommand::Destroy => self.destroy_window()?,
-            WCommand::IncreaseMainWidth => {
-                {
-                    let mut ws = self.focused_workspace.borrow_mut();
-                    if ws.width_factor + WIDTH_ADJUSTMENT_FACTOR > 0.95 {
-                        return Ok(());
-                    }
-                    ws.width_factor += WIDTH_ADJUSTMENT_FACTOR;
-                }
-                self.recompute_layout(&self.focused_monitor)?;
-            }
-            WCommand::DecreaseMainWidth => {
-                {
-                    let mut ws = self.focused_workspace.borrow_mut();
-                    if ws.width_factor - WIDTH_ADJUSTMENT_FACTOR < 0.05 {
-                        return Ok(());
-                    }
-                    ws.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
-                }
-                self.recompute_layout(&self.focused_monitor)?;
-            }
+            WCommand::AdjustMainWidth(dir) => self.adjust_main_width(dir)?,
             WCommand::Layout(layout) => self.update_workspace_layout(layout),
             WCommand::SelectWorkspace(idx) => self.select_workspace(idx).unwrap(),
             WCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
@@ -549,13 +527,30 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn move_client_to_monitor(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
+    fn adjust_main_width(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
+        {
+            let mut ws = self.focused_workspace.borrow_mut();
+            match dir {
+                WDirection::Prev if ws.width_factor - WIDTH_ADJUSTMENT_FACTOR >= 0.05 => {
+                    ws.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
+                }
+                WDirection::Next if ws.width_factor <= 0.95 => {
+                    ws.width_factor += WIDTH_ADJUSTMENT_FACTOR;
+                }
+                _ => {}
+            }
+        }
+        self.recompute_layout(&self.focused_monitor)?;
+        Ok(())
+    }
+
+    fn move_client_to_monitor(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
         if self.focused_client.is_none() {
             return Ok(());
         }
         let idx = match dir {
-            StackDirection::Prev => self.monitors.prev_index(true, false).unwrap(),
-            StackDirection::Next => self.monitors.next_index(true, false).unwrap(),
+            WDirection::Prev => self.monitors.prev_index(true, false).unwrap(),
+            WDirection::Next => self.monitors.next_index(true, false).unwrap(),
         };
 
         if idx == self.monitors.index() {
@@ -755,7 +750,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn move_adjacent(&mut self, dir: StackDirection) -> Result<(), ReplyOrIdError> {
+    fn move_adjacent(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
         {
             let mut ws = self.focused_workspace.borrow_mut();
             ws.swap_with_neighbor(dir);

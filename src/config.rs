@@ -39,7 +39,7 @@ pub mod commands {
     use crate::keyboard::keybind::WCommand;
     use crate::keyboard::keybind::WKeybind;
     use crate::layouts::WLayout;
-    use crate::util::StackDirection;
+    use crate::util::WDirection;
     use x11rb::protocol::xproto::ModMask;
     use xkbcommon::xkb::keysyms as ks;
 
@@ -58,19 +58,19 @@ pub mod commands {
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
             WKeybind::new(MOD,         ks::KEY_c,      WCommand::Spawn(CHATTERINO_CMD)),
             WKeybind::new(NONE,        ks::KEY_Print,  WCommand::Spawn(FLAMESHOT_CMD)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClientPrev),
-            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClientNext),
+            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClient(WDirection::Prev)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClient(WDirection::Next)),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
-            WKeybind::new(MOD | SHIFT, ks::KEY_h,      WCommand::DecreaseMainWidth),
-            WKeybind::new(MOD | SHIFT, ks::KEY_l,      WCommand::IncreaseMainWidth),
+            WKeybind::new(MOD | SHIFT, ks::KEY_h,      WCommand::AdjustMainWidth(WDirection::Prev)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_l,      WCommand::AdjustMainWidth(WDirection::Next)),
             WKeybind::new(MOD | SHIFT, ks::KEY_t,      WCommand::Layout(WLayout::MainStack)),
             WKeybind::new(MOD | SHIFT, ks::KEY_c,      WCommand::Layout(WLayout::Column)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_comma,  WCommand::MoveClientToMonitor(StackDirection::Prev)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_period, WCommand::MoveClientToMonitor(StackDirection::Next)),
-            WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusClientNext),
-            WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusClientPrev),
-            WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitorPrev),
-            WKeybind::new(MOD,         ks::KEY_l,      WCommand::FocusMonitorNext),
+            WKeybind::new(MOD | SHIFT, ks::KEY_comma,  WCommand::MoveClientToMonitor(WDirection::Prev)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_period, WCommand::MoveClientToMonitor(WDirection::Next)),
+            WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusClient(WDirection::Next)),
+            WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusClient(WDirection::Prev)),
+            WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitor(WDirection::Prev)),
+            WKeybind::new(MOD,         ks::KEY_l,      WCommand::FocusMonitor(WDirection::Next)),
             WKeybind::new(MOD,         ks::KEY_q,      WCommand::Exit),
             // BEGIN: workspace keybinds
             WKeybind::new(MOD,         ks::KEY_1,      WCommand::SelectWorkspace(0)),

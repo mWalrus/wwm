@@ -12,7 +12,7 @@ use x11rb::{
 use crate::{
     client::WClientState,
     config::{theme, workspaces::WORKSPACE_CAP},
-    util::{StackDirection, StateError, WVec},
+    util::{StateError, WDirection, WVec},
     workspace::WWorkspace,
 };
 
@@ -101,10 +101,10 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         self.workspaces.index() == idx
     }
 
-    pub fn next_workspace(&mut self, dir: StackDirection) -> Rc<RefCell<WWorkspace>> {
+    pub fn next_workspace(&mut self, dir: WDirection) -> Rc<RefCell<WWorkspace>> {
         match dir {
-            StackDirection::Prev => self.workspaces.prev_index(true, true).unwrap(),
-            StackDirection::Next => self.workspaces.next_index(true, true).unwrap(),
+            WDirection::Prev => self.workspaces.prev_index(true, true).unwrap(),
+            WDirection::Next => self.workspaces.next_index(true, true).unwrap(),
         };
         self.focused_workspace()
     }

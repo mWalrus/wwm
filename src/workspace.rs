@@ -8,7 +8,7 @@ use crate::{
     client::WClientState,
     config::workspaces::MAIN_CLIENT_WIDTH_PERCENTAGE,
     layouts::WLayout,
-    util::{ClientCell, StackDirection, WVec},
+    util::{ClientCell, WDirection, WVec},
 };
 
 #[derive(Default, Debug)]
@@ -26,10 +26,10 @@ impl WWorkspace {
         }
     }
 
-    pub fn client_from_direction(&mut self, dir: StackDirection) -> Option<ClientCell> {
+    pub fn client_from_direction(&mut self, dir: WDirection) -> Option<ClientCell> {
         let idx = match dir {
-            StackDirection::Prev => self.clients.prev_index(true, true),
-            StackDirection::Next => self.clients.next_index(true, true),
+            WDirection::Prev => self.clients.prev_index(true, true),
+            WDirection::Next => self.clients.next_index(true, true),
         };
         idx?;
 
@@ -48,14 +48,14 @@ impl WWorkspace {
         self.clients.selected()
     }
 
-    pub fn focus_neighbor(&mut self, dir: StackDirection) {
+    pub fn focus_neighbor(&mut self, dir: WDirection) {
         if self.clients.is_empty() {
             return;
         }
 
         match dir {
-            StackDirection::Prev => self.clients.prev_index(true, true),
-            StackDirection::Next => self.clients.next_index(true, true),
+            WDirection::Prev => self.clients.prev_index(true, true),
+            WDirection::Next => self.clients.next_index(true, true),
         };
     }
 
@@ -93,10 +93,10 @@ impl WWorkspace {
         true
     }
 
-    pub fn swap_with_neighbor(&mut self, dir: StackDirection) {
+    pub fn swap_with_neighbor(&mut self, dir: WDirection) {
         let idx = match dir {
-            StackDirection::Prev => self.clients.prev_index(true, false),
-            StackDirection::Next => self.clients.next_index(true, false),
+            WDirection::Prev => self.clients.prev_index(true, false),
+            WDirection::Next => self.clients.next_index(true, false),
         };
 
         if let Some(idx) = idx {

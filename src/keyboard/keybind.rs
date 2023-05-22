@@ -1,6 +1,6 @@
 use x11rb::protocol::xproto::{KeyButMask, ModMask};
 
-use crate::{layouts::WLayout, util::StackDirection};
+use crate::{layouts::WLayout, util::WDirection};
 
 #[derive(Debug)]
 pub struct WKeybind {
@@ -27,18 +27,14 @@ impl WKeybind {
 pub enum WCommand {
     Destroy,
     Exit,
-    FocusClientNext,
-    FocusClientPrev,
-    MoveClientNext,
-    MoveClientPrev,
-    FocusMonitorNext,
-    FocusMonitorPrev,
+    FocusClient(WDirection),
+    MoveClient(WDirection),
+    FocusMonitor(WDirection),
     Idle,
-    IncreaseMainWidth,
-    DecreaseMainWidth,
+    AdjustMainWidth(WDirection),
     Layout(WLayout),
     SelectWorkspace(usize),
     Spawn(&'static [&'static str]),
     MoveClientToWorkspace(usize),
-    MoveClientToMonitor(StackDirection),
+    MoveClientToMonitor(WDirection),
 }

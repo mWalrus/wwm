@@ -10,7 +10,7 @@ pub type ClientCell = Rc<RefCell<WClientState>>;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
-pub enum StackDirection {
+pub enum WDirection {
     Prev,
     Next,
 }

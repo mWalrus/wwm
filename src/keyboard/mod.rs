@@ -1,11 +1,11 @@
 pub mod keybind;
 
 use x11rb::connection::RequestConnection;
-use x11rb::protocol::xkb::{self, ConnectionExt as _, StateNotifyEvent};
+use x11rb::protocol::xkb::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask, Screen};
 use xcb::x::{Keysym, GRAB_ANY};
-use xkbcommon::xkb::{self as xkbc, KEY_Num_Lock, KEY_Shift_L};
-use xkbcommon::xkb::{State as KBState, KEY_F11};
+use xkbcommon::xkb::State as KBState;
+use xkbcommon::xkb::{self as xkbc, KEY_Num_Lock};
 
 use crate::config::commands;
 

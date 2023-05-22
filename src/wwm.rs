@@ -56,11 +56,6 @@ enum WindowState {
 enum NotifyMode {
     Normal,
     Inferior,
-    NotifyNonlinear,
-    NotifyNonlinearVirtual,
-    NotifyPointer,
-    NotifyPointerRoot,
-    NotifyDetailNone,
 }
 
 pub struct WinMan<'a, C: Connection> {
@@ -99,7 +94,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::become_wm(conn, screen_num, screen).unwrap();
         Self::run_auto_start_commands().unwrap();
 
-        let vis_info = Rc::new(RenderVisualInfo::new(conn, &screen).unwrap());
+        let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
         let font = LoadedFont::new(conn, vis_info.render.pict_format, theme::bar::FONT).unwrap();
         let font_drawer = Rc::new(FontDrawer::new(font));
 
@@ -272,7 +267,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             let text: Vec<u8> = text.collect();
             return Ok(String::from_utf8(text).unwrap());
         }
-        return Ok(String::new());
+        Ok(String::new())
     }
 
     fn focus(&mut self) -> Result<(), ReplyOrIdError> {

@@ -24,7 +24,7 @@ impl From<&GetGeometryReply> for ClientRect {
     }
 }
 
-impl<'a, C: Connection> From<&WMonitor<'_, C>> for ClientRect {
+impl<C: Connection> From<&WMonitor<'_, C>> for ClientRect {
     fn from(m: &WMonitor<C>) -> Self {
         Self {
             x: m.x,

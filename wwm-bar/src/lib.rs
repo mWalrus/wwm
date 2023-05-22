@@ -6,9 +6,7 @@ use visual::RenderVisualInfo;
 use x11rb::{
     connection::Connection,
     protocol::{
-        render::{
-            Color, ConnectionExt as _, CreatePictureAux, PictOp, Picture, PolyEdge, PolyMode,
-        },
+        render::{Color, ConnectionExt as _, CreatePictureAux, Picture, PolyEdge, PolyMode},
         xproto::{ConnectionExt, CreateWindowAux, Window, WindowClass},
     },
 };

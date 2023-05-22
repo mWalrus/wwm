@@ -13,10 +13,7 @@ use x11rb::{
     xcb_ffi::ConnectionError,
 };
 
-use crate::{
-    util::{hex_to_rgba_color, Rect},
-    WWorkspaceTag,
-};
+use crate::util::Rect;
 
 #[derive(Error, Debug)]
 pub enum DrawerError {

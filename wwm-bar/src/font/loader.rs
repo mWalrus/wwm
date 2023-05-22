@@ -7,18 +7,18 @@ use x11rb::{
     rust_connection::{ConnectionError, ReplyOrIdError},
 };
 
-const FONT_SIZE: f32 = 13.0;
-
 macro_rules! load_font {
     ($font_name:expr) => {{
         use ::font_loader::system_fonts as fonts;
-        let property = if $font_name == "" {
-            fonts::FontPropertyBuilder::new()
-                .family("monospace")
-                .build()
+        let family = if $font_name.is_empty() {
+            "monospace"
         } else {
-            fonts::FontPropertyBuilder::new().family($font_name).build()
+            $font_name
         };
+        let property = fonts::FontPropertyBuilder::new()
+            .monospace()
+            .family(family)
+            .build();
         let (font, _) = fonts::get(&property).unwrap();
         font
     }};
@@ -60,10 +60,11 @@ impl LoadedFont {
         conn: &C,
         pict_format: Pictformat,
         font_name: &'static str,
+        font_size: f32,
     ) -> Result<Self, FontError> {
         let font = load_font!(font_name);
         let settings = FontSettings {
-            scale: FONT_SIZE,
+            scale: font_size,
             ..Default::default()
         };
         let font = Font::from_bytes(font, settings).map_err(FontError::LoadFromBytes)?;
@@ -74,7 +75,7 @@ impl LoadedFont {
         let mut data = vec![];
         let mut max_height = 0;
         for (c, _) in font.chars() {
-            let (metrics, bitmaps) = font.rasterize(*c, FONT_SIZE);
+            let (metrics, bitmaps) = font.rasterize(*c, font_size);
             let height = metrics.height as i16 + metrics.ymin as i16;
             if height > max_height {
                 max_height = height;

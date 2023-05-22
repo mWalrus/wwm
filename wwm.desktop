@@ -1,0 +1,8 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=wwm
+Comment=Wally's window manager
+Exec=wwm
+Icon=wwm
+Type=XSession
+

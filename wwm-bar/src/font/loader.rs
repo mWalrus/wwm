@@ -9,6 +9,21 @@ use x11rb::{
 
 const FONT_SIZE: f32 = 13.0;
 
+macro_rules! load_font {
+    ($font_name:expr) => {{
+        use ::font_loader::system_fonts as fonts;
+        let property = if $font_name == "" {
+            fonts::FontPropertyBuilder::new()
+                .family("monospace")
+                .build()
+        } else {
+            fonts::FontPropertyBuilder::new().family($font_name).build()
+        };
+        let (font, _) = fonts::get(&property).unwrap();
+        font
+    }};
+}
+
 #[derive(Error, Debug)]
 pub enum FontError {
     #[error("Failed to load font data: {0}")]
@@ -41,8 +56,12 @@ pub struct FontEncodedChunk {
 }
 
 impl LoadedFont {
-    pub fn new<C: Connection>(conn: &C, pict_format: Pictformat) -> Result<Self, FontError> {
-        let font = include_bytes!("../../share/fonts/JetBrainsMono-Regular.ttf") as &[u8];
+    pub fn new<C: Connection>(
+        conn: &C,
+        pict_format: Pictformat,
+        font_name: &'static str,
+    ) -> Result<Self, FontError> {
+        let font = load_font!(font_name);
         let settings = FontSettings {
             scale: FONT_SIZE,
             ..Default::default()

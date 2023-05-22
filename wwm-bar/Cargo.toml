@@ -11,3 +11,4 @@ fontdue = "0.7.2"
 smallmap = "1.4.1"
 thiserror = "1.0.39"
 x11rb = { version = "0.11.1", features = ["libc"] }
+font-loader = "0.11.0"

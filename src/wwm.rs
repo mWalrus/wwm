@@ -100,7 +100,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::run_auto_start_commands().unwrap();
 
         let vis_info = Rc::new(RenderVisualInfo::new(conn, &screen).unwrap());
-        let font = LoadedFont::new(conn, vis_info.render.pict_format).unwrap();
+        let font = LoadedFont::new(conn, vis_info.render.pict_format, theme::bar::FONT).unwrap();
         let font_drawer = Rc::new(FontDrawer::new(font));
 
         let mut monitors: WVec<WMonitor<'a, C>> =

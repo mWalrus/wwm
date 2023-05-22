@@ -12,6 +12,7 @@ pub mod theme {
         pub const FG: u32 = 0xc6d0f5;
         pub const FONT_SIZE: f32 = 13.;
         pub const PADDING: u16 = 5;
+        pub const FONT: &str = "monospace";
     }
 }
 

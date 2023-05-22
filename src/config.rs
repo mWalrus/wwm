@@ -6,19 +6,26 @@ pub mod theme {
     }
 
     pub mod bar {
+        // these selected colors are used for workspace tags in the bar
         pub const BG_SELECTED: u32 = 0xca9ee6;
-        pub const BG: u32 = 0x232634;
         pub const FG_SELECTED: u32 = 0x232634;
+        // these colors are the default fore-/background colors used across the entire bar
+        pub const BG: u32 = 0x232634;
         pub const FG: u32 = 0xc6d0f5;
-        pub const FONT_SIZE: f32 = 13.;
+        pub const FONT_SIZE: f32 = 13.0;
+        // top/bottom padding around the text in the bar
         pub const PADDING: u16 = 5;
-        pub const FONT: &str = "monospace";
+        // Only the name of the font family is required. Wwm uses fontconfig to discover
+        // a monospaced font in that family and uses that for drawing text.
+        pub const FONT: &str = "MapleMono";
     }
 }
 
 pub mod workspaces {
     pub const WORKSPACE_CAP: usize = 9;
+    // how much of the monitor width the main client occupies in the main-stack layout
     pub const MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
+    // how much the main client's width is adjusted when resizing with keybinds
     pub const WIDTH_ADJUSTMENT_FACTOR: f32 = 0.02;
 }
 
@@ -43,7 +50,6 @@ pub mod commands {
     // spawn commands
     static TERM_CMD: &[&str] = &["alacritty"];
     static CHATTERINO_CMD: &[&str] = &["chatterino"];
-    static XEYES_CMD: &[&str] = &["xeyes"];
     static FLAMESHOT_CMD: &[&str] = &["flameshot", "gui"];
 
     #[rustfmt::skip]
@@ -51,14 +57,13 @@ pub mod commands {
         vec![
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
             WKeybind::new(MOD,         ks::KEY_c,      WCommand::Spawn(CHATTERINO_CMD)),
-            WKeybind::new(MOD,         ks::KEY_x,      WCommand::Spawn(XEYES_CMD)),
             WKeybind::new(NONE,        ks::KEY_Print,  WCommand::Spawn(FLAMESHOT_CMD)),
             WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClientPrev),
             WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClientNext),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
             WKeybind::new(MOD | SHIFT, ks::KEY_h,      WCommand::DecreaseMainWidth),
             WKeybind::new(MOD | SHIFT, ks::KEY_l,      WCommand::IncreaseMainWidth),
-            WKeybind::new(MOD | SHIFT, ks::KEY_t,      WCommand::Layout(WLayout::Tile)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_t,      WCommand::Layout(WLayout::MainStack)),
             WKeybind::new(MOD | SHIFT, ks::KEY_c,      WCommand::Layout(WLayout::Column)),
             WKeybind::new(MOD | SHIFT, ks::KEY_comma,  WCommand::MoveClientToMonitor(StackDirection::Prev)),
             WKeybind::new(MOD | SHIFT, ks::KEY_period, WCommand::MoveClientToMonitor(StackDirection::Next)),
@@ -67,7 +72,7 @@ pub mod commands {
             WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitorPrev),
             WKeybind::new(MOD,         ks::KEY_l,      WCommand::FocusMonitorNext),
             WKeybind::new(MOD,         ks::KEY_q,      WCommand::Exit),
-            // workspace keybinds
+            // BEGIN: workspace keybinds
             WKeybind::new(MOD,         ks::KEY_1,      WCommand::SelectWorkspace(0)),
             WKeybind::new(MOD,         ks::KEY_2,      WCommand::SelectWorkspace(1)),
             WKeybind::new(MOD,         ks::KEY_3,      WCommand::SelectWorkspace(2)),
@@ -77,7 +82,6 @@ pub mod commands {
             WKeybind::new(MOD,         ks::KEY_7,      WCommand::SelectWorkspace(6)),
             WKeybind::new(MOD,         ks::KEY_8,      WCommand::SelectWorkspace(7)),
             WKeybind::new(MOD,         ks::KEY_9,      WCommand::SelectWorkspace(8)),
-            // move to workspace keybinds
             WKeybind::new(MOD | SHIFT, ks::KEY_1,      WCommand::MoveClientToWorkspace(0)),
             WKeybind::new(MOD | SHIFT, ks::KEY_2,      WCommand::MoveClientToWorkspace(1)),
             WKeybind::new(MOD | SHIFT, ks::KEY_3,      WCommand::MoveClientToWorkspace(2)),
@@ -87,6 +91,7 @@ pub mod commands {
             WKeybind::new(MOD | SHIFT, ks::KEY_7,      WCommand::MoveClientToWorkspace(6)),
             WKeybind::new(MOD | SHIFT, ks::KEY_8,      WCommand::MoveClientToWorkspace(7)),
             WKeybind::new(MOD | SHIFT, ks::KEY_9,      WCommand::MoveClientToWorkspace(8)),
+            // END: workspace keybinds
         ]
     }
 }

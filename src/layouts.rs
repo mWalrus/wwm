@@ -12,7 +12,7 @@ use crate::{
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum WLayout {
     #[default]
-    Tile,
+    MainStack,
     Column,
     Floating,
 }
@@ -20,7 +20,7 @@ pub enum WLayout {
 impl fmt::Display for WLayout {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let symbol = match self {
-            WLayout::Tile => "[]=",
+            WLayout::MainStack => "[]=",
             WLayout::Column => "|||",
             WLayout::Floating => "   ",
         };
@@ -39,7 +39,7 @@ pub fn layout_clients<C: Connection>(
     }
 
     let rects = match layout {
-        WLayout::Tile => tile(monitor, width_factor, clients),
+        WLayout::MainStack => tile(monitor, width_factor, clients),
         WLayout::Column => col(monitor, clients),
         _ => todo!(),
     };

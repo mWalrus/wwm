@@ -14,6 +14,7 @@ pub enum WKeyCommand {
     Spawn(&'static [&'static str]),
     MoveClientToWorkspace(usize),
     MoveClientToMonitor(WDirection),
+    UnFloat,
 }
 
 #[derive(Debug, Clone, Copy)]

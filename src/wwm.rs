@@ -558,8 +558,20 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WKeyCommand::SelectWorkspace(idx) => self.select_workspace(idx, true).unwrap(),
             WKeyCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
             WKeyCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
+            WKeyCommand::UnFloat => self.unfloat_focused_client()?,
             WKeyCommand::Exit => self.try_exit(),
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn unfloat_focused_client(&mut self) -> Result<(), ReplyOrIdError> {
+        if let Some(c) = &self.focused_client {
+            if c.borrow().is_floating {
+                c.borrow_mut().is_floating = false;
+                self.recompute_layout(&self.focused_monitor)?;
+                self.warp_pointer_to_focused_client()?;
+            }
         }
         Ok(())
     }

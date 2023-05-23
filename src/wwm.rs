@@ -657,8 +657,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if mon.bar.has_pointer(evt.root_x, evt.root_y) {
             return Ok(());
         }
-        if !mon.has_pointer(&evt) {
-            drop(mon);
+        // skip monitor focus change if a window is being dragged
+        if !mon.has_pointer(&evt) && self.drag_window.is_none() {
+            drop(mon); // drop borrow before method call
             self.focus_at_pointer(&evt)?;
         }
 

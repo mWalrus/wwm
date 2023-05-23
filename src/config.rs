@@ -30,9 +30,21 @@ pub mod workspaces {
 }
 
 pub mod mouse {
-    use x11rb::protocol::xproto::Button;
+    use x11rb::protocol::xproto::{ButtonIndex, ModMask};
 
-    pub static DRAG_BUTTON: Button = 1;
+    use crate::keyboard::keybind::{WCommand, WMouseBind};
+
+    const MOD: ModMask = ModMask::M1;
+
+    pub const DRAG_BUTTON: ButtonIndex = ButtonIndex::M1; // left mouse button
+    pub const RESIZE_BUTTON: ButtonIndex = ButtonIndex::M2; // right mouse button
+
+    pub fn setup_mousebinds() -> Vec<WMouseBind> {
+        vec![
+            WMouseBind::new(MOD, DRAG_BUTTON, WCommand::DragClient),
+            WMouseBind::new(MOD, RESIZE_BUTTON, WCommand::ResizeClient),
+        ]
+    }
 }
 
 pub mod commands {

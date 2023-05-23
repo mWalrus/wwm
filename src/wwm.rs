@@ -7,6 +7,7 @@ use crate::{
     keyboard::{keybind::WCommand, WKeyboard},
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
+    mouse::WMouse,
     util::{self, ClientCell, WDirection, WVec},
     workspace::WWorkspace,
     AtomCollection,
@@ -27,7 +28,6 @@ use wwm_bar::{
 };
 use x11rb::{
     connection::Connection,
-    cursor::Handle as CursorHandle,
     protocol::{
         randr::ConnectionExt as _,
         xproto::{
@@ -39,7 +39,6 @@ use x11rb::{
         },
         ErrorKind, Event,
     },
-    resource_manager::new_from_default,
     rust_connection::{ReplyError, ReplyOrIdError},
     wrapper::ConnectionExt as _,
     CURRENT_TIME, NONE,
@@ -68,8 +67,9 @@ pub struct WinMan<'a, C: Connection> {
     focused_workspace: Rc<RefCell<WWorkspace>>,
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
-    drag_window: Option<(Window, (i16, i16))>,
+    drag_window: Option<(Window, ClientRect)>,
     keyboard: WKeyboard,
+    mouse: WMouse,
     atoms: AtomCollection,
     ignore_enter: bool,
     should_exit: Arc<AtomicBool>,
@@ -86,12 +86,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
         conn: &'a C,
         screen_num: usize,
         keyboard: WKeyboard,
+        mouse: WMouse,
         atoms: AtomCollection,
     ) -> Self {
         // TODO: error handling
         let screen = &conn.setup().roots[screen_num];
 
-        Self::become_wm(conn, screen_num, screen).unwrap();
+        conn.flush().unwrap();
+
+        Self::become_wm(conn, screen, mouse.cursors.normal).unwrap();
         Self::run_auto_start_commands().unwrap();
 
         let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
@@ -128,6 +131,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             pending_exposure: Default::default(),
             drag_window: None,
             keyboard,
+            mouse,
             atoms,
             ignore_enter: false,
             should_exit: Arc::new(AtomicBool::new(false)),
@@ -158,22 +162,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn become_wm(conn: &'a C, screen_num: usize, screen: &Screen) -> Result<(), ReplyError> {
-        let resource_db = new_from_default(conn)?;
-        let cursor_handle = CursorHandle::new(conn, screen_num, &resource_db)?;
-        let cursor_handle = cursor_handle.reply().unwrap();
-        conn.flush()?;
-
+    fn become_wm(conn: &'a C, screen: &Screen, cursor: u32) -> Result<(), ReplyError> {
         let change = ChangeWindowAttributesAux::default()
             .event_mask(
                 EventMask::SUBSTRUCTURE_REDIRECT
                     | EventMask::POINTER_MOTION
                     | EventMask::SUBSTRUCTURE_NOTIFY
                     | EventMask::BUTTON_PRESS
+                    | EventMask::BUTTON_RELEASE
                     | EventMask::STRUCTURE_NOTIFY
                     | EventMask::PROPERTY_CHANGE,
             )
-            .cursor(cursor_handle.load_cursor(conn, "left_ptr").unwrap());
+            .cursor(cursor);
 
         let res = conn
             .change_window_attributes(screen.root, &change)
@@ -387,8 +387,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_button_press(&mut self, evt: ButtonPressEvent) -> Result<(), ReplyOrIdError> {
-        let mut mon = self.focused_monitor.borrow_mut();
-        if mon.bar.has_pointer(evt.root_x, evt.root_y) {
+        println!("got button press: {evt:#?}");
+        if self
+            .focused_monitor
+            .borrow()
+            .bar
+            .has_pointer(evt.root_x, evt.root_y)
+        {
+            let mut mon = self.focused_monitor.borrow_mut();
             if let Some(idx) = mon.bar.select_tag_at_pos(evt.event_x, evt.event_y) {
                 drop(mon);
                 self.select_workspace(idx, false)?;
@@ -396,25 +402,45 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        if evt.detail != DRAG_BUTTON || u16::from(evt.state) != 0 {
-            return Ok(());
-        }
-        let ws = self.focused_workspace.borrow();
-        if let Some(client) = ws.find_client_by_win(evt.event) {
-            let c = client.borrow();
-            if self.drag_window.is_none() && evt.event_x < 0.max(c.rect.width as i16) {
-                let (x, y) = (-evt.event_x, -evt.event_y);
-                self.drag_window = Some((c.window, (x, y)));
+        let mut action = WCommand::Idle;
+        for bind in &self.mouse.binds {
+            println!(
+                "evt detail: {}, bind button: {}\nevt state: {:?}, bind mask: {:?}",
+                evt.detail,
+                bind.button,
+                bind.mods_as_key_but_mask(),
+                evt.state
+            );
+            if bind.button == evt.detail && bind.mods_as_key_but_mask() == evt.state {
+                action = bind.action;
+                break;
             }
         }
+        match action {
+            WCommand::ResizeClient => {}
+            WCommand::DragClient => self.drag_client(evt),
+            _ => {}
+        }
+
         Ok(())
     }
 
+    fn drag_client(&mut self, evt: ButtonPressEvent) {
+        if let Some(c) = &self.focused_client {
+            let mut c = c.borrow_mut();
+            if self.drag_window.is_none()
+                && evt.root_x < c.rect.x.max(c.rect.x + c.rect.width as i16)
+            {
+                c.is_floating = true;
+                self.drag_window = Some((c.window, c.rect));
+            }
+        }
+    }
+
     fn handle_button_release(&mut self, evt: ButtonReleaseEvent) -> Result<(), ReplyError> {
-        if evt.detail == DRAG_BUTTON {
+        if evt.detail == u8::from(DRAG_BUTTON) {
             self.drag_window = None;
         }
-
         Ok(())
     }
 
@@ -532,7 +558,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
             WCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
             WCommand::Exit => self.try_exit(),
-            WCommand::Idle => {}
+            _ => {}
         }
         Ok(())
     }
@@ -627,22 +653,40 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
-        {
-            let mon = self.focused_monitor.borrow();
-            if mon.bar.has_pointer(evt.root_x, evt.root_y) {
+        let mon = self.focused_monitor.borrow();
+        if mon.bar.has_pointer(evt.root_x, evt.root_y) {
+            return Ok(());
+        }
+        if !mon.has_pointer(&evt) {
+            drop(mon);
+            self.focus_at_pointer(&evt)?;
+        }
+
+        if let Some(c) = &self.focused_client {
+            let c = c.borrow();
+            if c.is_fullscreen {
                 return Ok(());
-            }
-            if !mon.has_pointer(&evt) {
-                drop(mon);
-                self.focus_at_pointer(&evt)?;
             }
         }
 
-        if let Some((win, (x, y))) = self.drag_window {
-            let (x, y) = (x + evt.root_x, y + evt.root_y);
+        // FIXME: this centers the window on the mouse position.
+        //        I would like it to keep the offset to the mouse instead.
+        if let Some((win, mut rect)) = self.drag_window {
+            let (px, py) = (evt.event_x, evt.event_y);
+            let ClientRect { width, height, .. } = rect;
+            let x = px - (width as i16 / 2);
+            let y = py - (height as i16 / 2);
+
+            rect.x = x;
+            rect.y = y;
+
             let (x, y) = (x as i32, y as i32);
-            self.conn
-                .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+            if let Some(c) = &self.focused_workspace.borrow_mut().find_client_by_win(win) {
+                c.borrow_mut().rect = rect;
+                self.conn
+                    .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+                self.conn.flush()?;
+            }
         }
         Ok(())
     }
@@ -674,6 +718,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
             win,
             self.atoms._NET_WM_WINDOW_TYPE_DIALOG,
             self.atoms._NET_WM_WINDOW_TYPE,
+            self.atoms.ATOM,
+        )?;
+
+        let is_fullscreen = self.window_property_exists(
+            win,
+            self.atoms._NET_WM_STATE_FULLSCREEN,
+            self.atoms._NET_WM_STATE,
             self.atoms.ATOM,
         )?;
 
@@ -741,6 +792,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 EventMask::ENTER_WINDOW
                     | EventMask::FOCUS_CHANGE
                     | EventMask::PROPERTY_CHANGE
+                    | EventMask::SUBSTRUCTURE_REDIRECT
                     | EventMask::STRUCTURE_NOTIFY,
             );
 
@@ -753,6 +805,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 win,
                 ClientRect::new(x, y, geom.width, geom.height),
                 is_floating,
+                is_fullscreen,
             ));
         self.set_client_state(win, WindowState::Normal)?;
 

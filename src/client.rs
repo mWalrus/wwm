@@ -61,14 +61,16 @@ pub struct WClientState {
     pub window: Window,
     pub rect: ClientRect,
     pub is_floating: bool,
+    pub is_fullscreen: bool,
 }
 
 impl WClientState {
-    pub fn new(window: Window, rect: ClientRect, is_floating: bool) -> Self {
+    pub fn new(window: Window, rect: ClientRect, is_floating: bool, is_fullscreen: bool) -> Self {
         Self {
             window,
             rect,
             is_floating,
+            is_fullscreen,
         }
     }
 }

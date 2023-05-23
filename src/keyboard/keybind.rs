@@ -23,6 +23,27 @@ impl WKeybind {
     }
 }
 
+#[derive(Debug)]
+pub struct WMouseBind {
+    pub mods: ModMask,
+    pub button: u8,
+    pub action: WCommand,
+}
+
+impl WMouseBind {
+    pub fn new<M: Into<ModMask>>(mods: M, button: impl Into<u8>, action: WCommand) -> Self {
+        Self {
+            mods: mods.into(),
+            button: button.into(),
+            action,
+        }
+    }
+
+    pub fn mods_as_key_but_mask(&self) -> KeyButMask {
+        KeyButMask::from(u16::from(self.mods))
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum WCommand {
     Destroy,
@@ -30,6 +51,8 @@ pub enum WCommand {
     FocusClient(WDirection),
     MoveClient(WDirection),
     FocusMonitor(WDirection),
+    DragClient,
+    ResizeClient,
     Idle,
     AdjustMainWidth(WDirection),
     Layout(WLayout),

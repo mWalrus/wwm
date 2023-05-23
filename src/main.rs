@@ -3,11 +3,13 @@ mod config;
 mod keyboard;
 mod layouts;
 mod monitor;
+mod mouse;
 mod util;
 mod workspace;
 mod wwm;
 
 use keyboard::WKeyboard;
+use mouse::WMouse;
 use wwm::WinMan;
 use x11rb::atom_manager;
 use x11rb::connection::Connection;
@@ -51,8 +53,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let screen = &conn.setup().roots[screen_num];
     let keyboard = WKeyboard::new(&conn, &xcb_conn, screen)?;
+    let mouse = WMouse::new(&conn, screen_num);
 
-    let mut wwm = WinMan::init(&conn, screen_num, keyboard, atoms);
+    let mut wwm = WinMan::init(&conn, screen_num, keyboard, mouse, atoms);
     wwm.run().unwrap();
     Ok(())
 }

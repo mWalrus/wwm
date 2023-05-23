@@ -31,7 +31,7 @@ __Column layout__:
   - [x] Workspace tags
     - [x] Focus indication
     - [ ] "Contains-clients" indication
-    - [ ] Click to change focus
+    - [x] Click to change focus
   - [x] Current layout indicator
   - [x] Current focused window title
   - [ ] Modular status indicators (such as time, date, ram, cpu, etc.)

@@ -17,7 +17,7 @@ pub mod theme {
         pub const PADDING: u16 = 5;
         // Only the name of the font family is required. Wwm uses fontconfig to discover
         // a monospaced font in that family and uses that for drawing text.
-        pub const FONT: &str = "MapleMono";
+        pub const FONT: &str = "";
     }
 }
 

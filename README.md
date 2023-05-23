@@ -22,10 +22,10 @@ __Column layout__:
 ## Features
 - [x] Multi monitor support using RandR
 - [x] Workspaces/virtual desktops
-- [ ] Layouts
+- [x] Layouts
   - [x] Main-stack
   - [x] Column
-  - [ ] Floating
+  - [x] Floating (dialog windows, etc.)
 - [x] Workspace specific layout switching
 - [ ] Bar
   - [x] Workspace tags
@@ -35,16 +35,18 @@ __Column layout__:
   - [x] Current layout indicator
   - [x] Current focused window title
   - [ ] Modular status indicators (such as time, date, ram, cpu, etc.)
-- [x] Cursor warping on focus change
+- [x] Cursor warping on client focus change
 - [x] Customizability (configure in code)
   - [x] Theming
   - [x] Custom keybinds
   - [x] Auto start commands
   - [x] Program spawning
 - [x] Move clients between monitors and/or workspaces
-- [x] Respects floating windows such as dialog windows
+- [x] Respects floating clients such as dialog windows
+- [x] Move clients with mouse
+- [ ] Resize clients with mouse
+- [x] Unfloat floating clients
 - [ ] Fullscreening
-- [ ] Mouse based move/resize
 
 
 ## Configuration

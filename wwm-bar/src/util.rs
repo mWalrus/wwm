@@ -12,6 +12,12 @@ impl Rect {
     pub fn new(x: i16, y: i16, w: u16, h: u16) -> Self {
         Self { x, y, w, h }
     }
+
+    pub fn has_pointer(&self, px: i16, py: i16) -> bool {
+        let has_x = px >= self.x && px <= self.x + self.w as i16;
+        let has_y = py >= self.y && py <= self.y + self.h as i16;
+        has_x && has_y
+    }
 }
 
 impl From<Rect> for Rectangle {

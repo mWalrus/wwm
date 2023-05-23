@@ -386,9 +386,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(monitors)
     }
 
-    fn handle_button_press(&mut self, evt: ButtonPressEvent) {
+    fn handle_button_press(&mut self, evt: ButtonPressEvent) -> Result<(), ReplyOrIdError> {
+        let mut mon = self.focused_monitor.borrow_mut();
+        if mon.bar.has_pointer(evt.root_x, evt.root_y) {
+            if let Some(idx) = mon.bar.select_tag_at_pos(evt.event_x, evt.event_y) {
+                drop(mon);
+                self.select_workspace(idx, false)?;
+            }
+            return Ok(());
+        }
+
         if evt.detail != DRAG_BUTTON || u16::from(evt.state) != 0 {
-            return;
+            return Ok(());
         }
         let ws = self.focused_workspace.borrow();
         if let Some(client) = ws.find_client_by_win(evt.event) {
@@ -398,6 +407,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 self.drag_window = Some((c.window, (x, y)));
             }
         }
+        Ok(())
     }
 
     fn handle_button_release(&mut self, evt: ButtonReleaseEvent) -> Result<(), ReplyError> {
@@ -482,7 +492,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::Expose(e) => self.handle_expose(e),
             Event::EnterNotify(e) => self.handle_enter(e)?,
             Event::DestroyNotify(e) => self.handle_destroy(e)?,
-            Event::ButtonPress(e) => self.handle_button_press(e),
+            Event::ButtonPress(e) => self.handle_button_press(e)?,
             Event::ButtonRelease(e) => self.handle_button_release(e)?,
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
             Event::KeyPress(e) => self.handle_key_press(e)?,
@@ -518,7 +528,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WCommand::Destroy => self.destroy_window()?,
             WCommand::AdjustMainWidth(dir) => self.adjust_main_width(dir)?,
             WCommand::Layout(layout) => self.update_workspace_layout(layout),
-            WCommand::SelectWorkspace(idx) => self.select_workspace(idx).unwrap(),
+            WCommand::SelectWorkspace(idx) => self.select_workspace(idx, true).unwrap(),
             WCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
             WCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
             WCommand::Exit => self.try_exit(),
@@ -617,8 +627,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
-        if !self.focused_monitor.borrow().has_pointer(&evt) {
-            self.focus_at_pointer(&evt)?;
+        {
+            let mon = self.focused_monitor.borrow();
+            if mon.bar.has_pointer(evt.root_x, evt.root_y) {
+                return Ok(());
+            }
+            if !mon.has_pointer(&evt) {
+                drop(mon);
+                self.focus_at_pointer(&evt)?;
+            }
         }
 
         if let Some((win, (x, y))) = self.drag_window {
@@ -822,7 +839,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn select_workspace(&mut self, idx: usize) -> Result<(), ReplyOrIdError> {
+    fn select_workspace(&mut self, idx: usize, warp: bool) -> Result<(), ReplyOrIdError> {
         {
             let m = self.focused_monitor.borrow();
             // early return since we dont want to do anything here
@@ -852,7 +869,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.recompute_layout(&self.focused_monitor)?;
 
         self.focus()?;
-        self.warp_pointer_to_focused_client()?;
+        if warp {
+            self.warp_pointer_to_focused_client()?;
+        }
 
         Ok(())
     }

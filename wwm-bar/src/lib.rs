@@ -7,7 +7,7 @@ use x11rb::{
     connection::Connection,
     protocol::{
         render::{Color, ConnectionExt as _, CreatePictureAux, Picture, PolyEdge, PolyMode},
-        xproto::{ConnectionExt, CreateWindowAux, Window, WindowClass},
+        xproto::{ConnectionExt, CreateWindowAux, EventMask, Window, WindowClass},
     },
 };
 
@@ -91,6 +91,7 @@ impl WBar {
             0,
             &CreateWindowAux::new()
                 .background_pixel(colors[1])
+                .event_mask(EventMask::BUTTON_PRESS)
                 .override_redirect(1),
         )
         .unwrap();
@@ -193,6 +194,25 @@ impl WBar {
                 Redraw::Title,
             ],
         }
+    }
+
+    pub fn has_pointer(&self, px: i16, py: i16) -> bool {
+        self.rect.has_pointer(px, py)
+    }
+
+    pub fn select_tag_at_pos(&mut self, x: i16, y: i16) -> Option<usize> {
+        if y > self.rect.y + self.rect.h as i16 {
+            return None;
+        }
+
+        let mut tag_idx = None;
+        for (i, t) in self.tags.iter_mut().enumerate() {
+            if t.rect.has_pointer(x, y) {
+                tag_idx = Some(i);
+                break;
+            }
+        }
+        tag_idx
     }
 
     pub fn update_layout_symbol<C: Connection>(&mut self, conn: &C, layout_symbol: impl ToString) {

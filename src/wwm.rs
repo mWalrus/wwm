@@ -405,13 +405,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let mut action = WMouseCommand::Idle;
         for bind in &self.mouse.binds {
-            println!(
-                "evt detail: {}, bind button: {}\nevt state: {:?}, bind mask: {:?}",
-                evt.detail,
-                bind.button,
-                bind.mods_as_key_but_mask(),
-                evt.state
-            );
             if bind.button == evt.detail && bind.mods_as_key_but_mask() == evt.state {
                 action = bind.action;
                 break;
@@ -434,6 +427,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             {
                 c.is_floating = true;
                 self.drag_window = Some((c.window, c.rect));
+                drop(c);
+                self.recompute_layout(&self.focused_monitor).unwrap();
             }
         }
     }

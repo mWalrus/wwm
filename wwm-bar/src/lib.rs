@@ -7,7 +7,7 @@ use x11rb::{
     connection::Connection,
     protocol::{
         render::{Color, ConnectionExt as _, CreatePictureAux, Picture, PolyEdge, PolyMode},
-        xproto::{ConnectionExt, CreateWindowAux, EventMask, Window, WindowClass},
+        xproto::{BackingStore, ConnectionExt, CreateWindowAux, EventMask, Window, WindowClass},
     },
 };
 
@@ -92,6 +92,7 @@ impl WBar {
             &CreateWindowAux::new()
                 .background_pixel(colors[1])
                 .event_mask(EventMask::BUTTON_PRESS)
+                .backing_store(BackingStore::WHEN_MAPPED)
                 .override_redirect(1),
         )
         .unwrap();

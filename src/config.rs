@@ -32,7 +32,7 @@ pub mod workspaces {
 pub mod mouse {
     use x11rb::protocol::xproto::{ButtonIndex, ModMask};
 
-    use crate::keyboard::keybind::{WCommand, WMouseBind};
+    use crate::{command::WMouseCommand, mouse::WMouseBind};
 
     const MOD: ModMask = ModMask::M1;
 
@@ -41,14 +41,14 @@ pub mod mouse {
 
     pub fn setup_mousebinds() -> Vec<WMouseBind> {
         vec![
-            WMouseBind::new(MOD, DRAG_BUTTON, WCommand::DragClient),
-            WMouseBind::new(MOD, RESIZE_BUTTON, WCommand::ResizeClient),
+            WMouseBind::new(MOD, DRAG_BUTTON, WMouseCommand::DragClient),
+            WMouseBind::new(MOD, RESIZE_BUTTON, WMouseCommand::ResizeClient),
         ]
     }
 }
 
 pub mod commands {
-    use crate::keyboard::keybind::WCommand;
+    use crate::command::WKeyCommand;
     use crate::keyboard::keybind::WKeybind;
     use crate::layouts::WLayout;
     use crate::util::WDirection;
@@ -67,42 +67,42 @@ pub mod commands {
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
         vec![
-            WKeybind::new(MOD | SHIFT, ks::KEY_Return, WCommand::Spawn(TERM_CMD)),
-            WKeybind::new(MOD,         ks::KEY_c,      WCommand::Spawn(CHATTERINO_CMD)),
-            WKeybind::new(NONE,        ks::KEY_Print,  WCommand::Spawn(FLAMESHOT_CMD)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WCommand::MoveClient(WDirection::Prev)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WCommand::MoveClient(WDirection::Next)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_q,      WCommand::Destroy),
-            WKeybind::new(MOD | SHIFT, ks::KEY_h,      WCommand::AdjustMainWidth(WDirection::Prev)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_l,      WCommand::AdjustMainWidth(WDirection::Next)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_t,      WCommand::Layout(WLayout::MainStack)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_c,      WCommand::Layout(WLayout::Column)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_comma,  WCommand::MoveClientToMonitor(WDirection::Prev)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_period, WCommand::MoveClientToMonitor(WDirection::Next)),
-            WKeybind::new(MOD,         ks::KEY_j,      WCommand::FocusClient(WDirection::Next)),
-            WKeybind::new(MOD,         ks::KEY_k,      WCommand::FocusClient(WDirection::Prev)),
-            WKeybind::new(MOD,         ks::KEY_h,      WCommand::FocusMonitor(WDirection::Prev)),
-            WKeybind::new(MOD,         ks::KEY_l,      WCommand::FocusMonitor(WDirection::Next)),
-            WKeybind::new(MOD,         ks::KEY_q,      WCommand::Exit),
+            WKeybind::new(MOD | SHIFT, ks::KEY_Return, WKeyCommand::Spawn(TERM_CMD)),
+            WKeybind::new(MOD,         ks::KEY_c,      WKeyCommand::Spawn(CHATTERINO_CMD)),
+            WKeybind::new(NONE,        ks::KEY_Print,  WKeyCommand::Spawn(FLAMESHOT_CMD)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_k,      WKeyCommand::MoveClient(WDirection::Prev)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_j,      WKeyCommand::MoveClient(WDirection::Next)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_q,      WKeyCommand::Destroy),
+            WKeybind::new(MOD | SHIFT, ks::KEY_h,      WKeyCommand::AdjustMainWidth(WDirection::Prev)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_l,      WKeyCommand::AdjustMainWidth(WDirection::Next)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_t,      WKeyCommand::Layout(WLayout::MainStack)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_c,      WKeyCommand::Layout(WLayout::Column)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_comma,  WKeyCommand::MoveClientToMonitor(WDirection::Prev)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_period, WKeyCommand::MoveClientToMonitor(WDirection::Next)),
+            WKeybind::new(MOD,         ks::KEY_j,      WKeyCommand::FocusClient(WDirection::Next)),
+            WKeybind::new(MOD,         ks::KEY_k,      WKeyCommand::FocusClient(WDirection::Prev)),
+            WKeybind::new(MOD,         ks::KEY_h,      WKeyCommand::FocusMonitor(WDirection::Prev)),
+            WKeybind::new(MOD,         ks::KEY_l,      WKeyCommand::FocusMonitor(WDirection::Next)),
+            WKeybind::new(MOD,         ks::KEY_q,      WKeyCommand::Exit),
             // BEGIN: workspace keybinds
-            WKeybind::new(MOD,         ks::KEY_1,      WCommand::SelectWorkspace(0)),
-            WKeybind::new(MOD,         ks::KEY_2,      WCommand::SelectWorkspace(1)),
-            WKeybind::new(MOD,         ks::KEY_3,      WCommand::SelectWorkspace(2)),
-            WKeybind::new(MOD,         ks::KEY_4,      WCommand::SelectWorkspace(3)),
-            WKeybind::new(MOD,         ks::KEY_5,      WCommand::SelectWorkspace(4)),
-            WKeybind::new(MOD,         ks::KEY_6,      WCommand::SelectWorkspace(5)),
-            WKeybind::new(MOD,         ks::KEY_7,      WCommand::SelectWorkspace(6)),
-            WKeybind::new(MOD,         ks::KEY_8,      WCommand::SelectWorkspace(7)),
-            WKeybind::new(MOD,         ks::KEY_9,      WCommand::SelectWorkspace(8)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_1,      WCommand::MoveClientToWorkspace(0)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_2,      WCommand::MoveClientToWorkspace(1)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_3,      WCommand::MoveClientToWorkspace(2)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_4,      WCommand::MoveClientToWorkspace(3)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_5,      WCommand::MoveClientToWorkspace(4)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_6,      WCommand::MoveClientToWorkspace(5)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_7,      WCommand::MoveClientToWorkspace(6)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_8,      WCommand::MoveClientToWorkspace(7)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_9,      WCommand::MoveClientToWorkspace(8)),
+            WKeybind::new(MOD,         ks::KEY_1,      WKeyCommand::SelectWorkspace(0)),
+            WKeybind::new(MOD,         ks::KEY_2,      WKeyCommand::SelectWorkspace(1)),
+            WKeybind::new(MOD,         ks::KEY_3,      WKeyCommand::SelectWorkspace(2)),
+            WKeybind::new(MOD,         ks::KEY_4,      WKeyCommand::SelectWorkspace(3)),
+            WKeybind::new(MOD,         ks::KEY_5,      WKeyCommand::SelectWorkspace(4)),
+            WKeybind::new(MOD,         ks::KEY_6,      WKeyCommand::SelectWorkspace(5)),
+            WKeybind::new(MOD,         ks::KEY_7,      WKeyCommand::SelectWorkspace(6)),
+            WKeybind::new(MOD,         ks::KEY_8,      WKeyCommand::SelectWorkspace(7)),
+            WKeybind::new(MOD,         ks::KEY_9,      WKeyCommand::SelectWorkspace(8)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_1,      WKeyCommand::MoveClientToWorkspace(0)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_2,      WKeyCommand::MoveClientToWorkspace(1)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_3,      WKeyCommand::MoveClientToWorkspace(2)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_4,      WKeyCommand::MoveClientToWorkspace(3)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_5,      WKeyCommand::MoveClientToWorkspace(4)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_6,      WKeyCommand::MoveClientToWorkspace(5)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_7,      WKeyCommand::MoveClientToWorkspace(6)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_8,      WKeyCommand::MoveClientToWorkspace(7)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_9,      WKeyCommand::MoveClientToWorkspace(8)),
             // END: workspace keybinds
         ]
     }

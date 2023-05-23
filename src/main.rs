@@ -1,4 +1,5 @@
 mod client;
+mod command;
 mod config;
 mod keyboard;
 mod layouts;

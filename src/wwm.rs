@@ -1,10 +1,11 @@
 use crate::{
     client::{ClientRect, WClientState},
+    command::{WKeyCommand, WMouseCommand},
     config::{
         auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme,
         workspaces::WIDTH_ADJUSTMENT_FACTOR,
     },
-    keyboard::{keybind::WCommand, WKeyboard},
+    keyboard::WKeyboard,
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
@@ -402,7 +403,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        let mut action = WCommand::Idle;
+        let mut action = WMouseCommand::Idle;
         for bind in &self.mouse.binds {
             println!(
                 "evt detail: {}, bind button: {}\nevt state: {:?}, bind mask: {:?}",
@@ -417,8 +418,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         }
         match action {
-            WCommand::ResizeClient => {}
-            WCommand::DragClient => self.drag_client(evt),
+            WMouseCommand::ResizeClient => {}
+            WMouseCommand::DragClient => self.drag_client(evt),
             _ => {}
         }
 
@@ -537,7 +538,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn handle_key_press(&mut self, evt: KeyPressEvent) -> Result<(), ReplyOrIdError> {
         let sym = self.keyboard.key_sym(evt.detail.into());
 
-        let mut action = WCommand::Idle;
+        let mut action = WKeyCommand::Idle;
         for bind in &self.keyboard.keybinds {
             if bind.keysym == sym && evt.state == bind.mods_as_key_but_mask() {
                 action = bind.action;
@@ -547,17 +548,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
         println!("got action: {action:?}");
 
         match action {
-            WCommand::FocusClient(dir) => self.focus_adjacent(dir)?,
-            WCommand::MoveClient(dir) => self.move_adjacent(dir)?,
-            WCommand::FocusMonitor(dir) => self.focus_adjacent_monitor(dir)?,
-            WCommand::Spawn(cmd) => self.spawn_program(cmd),
-            WCommand::Destroy => self.destroy_window()?,
-            WCommand::AdjustMainWidth(dir) => self.adjust_main_width(dir)?,
-            WCommand::Layout(layout) => self.update_workspace_layout(layout),
-            WCommand::SelectWorkspace(idx) => self.select_workspace(idx, true).unwrap(),
-            WCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
-            WCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
-            WCommand::Exit => self.try_exit(),
+            WKeyCommand::FocusClient(dir) => self.focus_adjacent(dir)?,
+            WKeyCommand::MoveClient(dir) => self.move_adjacent(dir)?,
+            WKeyCommand::FocusMonitor(dir) => self.focus_adjacent_monitor(dir)?,
+            WKeyCommand::Spawn(cmd) => self.spawn_program(cmd),
+            WKeyCommand::Destroy => self.destroy_window()?,
+            WKeyCommand::AdjustMainWidth(dir) => self.adjust_main_width(dir)?,
+            WKeyCommand::Layout(layout) => self.update_workspace_layout(layout),
+            WKeyCommand::SelectWorkspace(idx) => self.select_workspace(idx, true).unwrap(),
+            WKeyCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
+            WKeyCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
+            WKeyCommand::Exit => self.try_exit(),
             _ => {}
         }
         Ok(())

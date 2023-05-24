@@ -41,7 +41,7 @@ impl WMouse {
             let cur = match bind.action {
                 WMouseCommand::DragClient => cursors.r#move,
                 WMouseCommand::ResizeClient => cursors.resize,
-                _ => 0, // invalid
+                _ => cursors.normal,
             };
 
             conn.grab_button(

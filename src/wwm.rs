@@ -456,8 +456,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                         0,
                         0,
                         0,
-                        (c.rect.width + BORDER_WIDTH) as i16,
-                        (c.rect.height + BORDER_WIDTH) as i16,
+                        (c.rect.width + BORDER_WIDTH - 1) as i16,
+                        (c.rect.height + BORDER_WIDTH - 1) as i16,
                     )?;
                     self.resize_window = Some(evt.time);
                     should_recompute_layout = true;
@@ -468,6 +468,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
             if !should_recompute_layout {
                 return Ok(());
             }
+
+            // bring window to front
+            self.conn.configure_window(
+                c.window,
+                &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
+            )?;
 
             c.is_floating = true;
             drop(c);
@@ -742,6 +748,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 return Ok(());
             }
 
+            // FIXME: mouse moves outside window and starts resizing below windows
+            //        if there are any.
             let nw = 1.max(ev.root_x - c.rect.x - (2 * BORDER_WIDTH as i16) + 1);
             let nh = 1.max(ev.root_y - c.rect.y - (2 * BORDER_WIDTH as i16) + 1);
 

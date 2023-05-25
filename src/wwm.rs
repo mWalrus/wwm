@@ -33,10 +33,10 @@ use x11rb::{
         randr::ConnectionExt as _,
         xproto::{
             ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
-            ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt, DestroyNotifyEvent,
-            EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply, InputFocus, KeyPressEvent,
-            MapRequestEvent, MapState, MotionNotifyEvent, PropMode, PropertyNotifyEvent, Screen,
-            SetMode, StackMode, UnmapNotifyEvent, Window,
+            CloseDown, ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt,
+            DestroyNotifyEvent, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
+            InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent, PropMode,
+            PropertyNotifyEvent, Screen, SetMode, StackMode, UnmapNotifyEvent, Window,
         },
         ErrorKind, Event,
     },
@@ -204,7 +204,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             window,
             self.atoms.WM_DELETE_WINDOW,
             self.atoms.WM_PROTOCOLS,
-            self.atoms.ATOM_ATOM,
+            self.atoms.ATOM,
         )?;
 
         self.detach(window);
@@ -212,7 +212,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if delete_exists {
             self.send_event(window, self.atoms.WM_DELETE_WINDOW)?;
         } else {
-            self.conn.destroy_window(window)?;
+            self.conn.grab_server()?;
+            self.conn.set_close_down_mode(CloseDown::DESTROY_ALL)?;
+            self.conn.kill_client(window)?;
+            self.conn.sync()?;
+            self.conn.ungrab_server()?;
         }
 
         self.ignore_enter = true;

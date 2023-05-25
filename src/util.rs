@@ -3,11 +3,35 @@ use std::{
     rc::Rc,
 };
 
-use crate::{client::WClientState, config};
+use crate::{
+    client::{ClientRect, WClientState},
+    config,
+};
 
 pub type ClientCell = Rc<RefCell<WClientState>>;
 
 use thiserror::Error;
+
+#[derive(Clone, Copy)]
+pub struct Pos {
+    pub x: i16,
+    pub y: i16,
+}
+
+impl From<ClientRect> for Pos {
+    fn from(value: ClientRect) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+        }
+    }
+}
+
+impl Pos {
+    pub fn new(x: i16, y: i16) -> Self {
+        Self { x, y }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum WDirection {

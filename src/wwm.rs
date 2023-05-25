@@ -9,7 +9,7 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, ClientCell, WDirection, WVec},
+    util::{self, ClientCell, Pos, WDirection, WVec},
     workspace::WWorkspace,
     AtomCollection,
 };
@@ -68,7 +68,7 @@ pub struct WinMan<'a, C: Connection> {
     focused_workspace: Rc<RefCell<WWorkspace>>,
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
-    drag_window: Option<(Window, ClientRect, u32)>,
+    drag_window: Option<(Window, Pos, Pos, u32)>,
     keyboard: WKeyboard,
     mouse: WMouse,
     atoms: AtomCollection,
@@ -430,7 +430,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 && evt.root_x < c.rect.x.max(c.rect.x + c.rect.width as i16)
             {
                 c.is_floating = true;
-                self.drag_window = Some((c.window, c.rect, evt.time));
+                self.drag_window = Some((
+                    c.window,
+                    Pos::from(c.rect),
+                    Pos::new(evt.root_x, evt.root_y),
+                    evt.time,
+                ));
                 drop(c);
                 self.recompute_layout(&self.focused_monitor).unwrap();
             }
@@ -684,7 +689,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         // FIXME: this centers the window on the mouse position.
         //        I would like it to keep the offset to the mouse instead.
-        if let Some((win, rect, last_move)) = self.drag_window {
+        if let Some((win, oc_pos, op_pos, last_move)) = self.drag_window {
             // limit to 60 fps
             if evt.time - last_move <= (1000 / 60) {
                 return Ok(());
@@ -692,17 +697,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
             if let Some(c) = &self.focused_workspace.borrow_mut().find_client_by_win(win) {
                 let mut c = c.borrow_mut();
-                let (px, py) = (evt.event_x, evt.event_y);
-                let ClientRect { width, height, .. } = rect;
-                let x = px - (width as i16 / 2);
-                let y = py - (height as i16 / 2);
 
-                c.rect.x = x;
-                c.rect.y = y;
+                let pdx = evt.root_x - op_pos.x;
+                let pdy = evt.root_y - op_pos.y;
+                let nx = oc_pos.x + pdx;
+                let ny = oc_pos.y + pdy;
 
-                let (x, y) = (x as i32, y as i32);
+                c.rect.x = nx;
+                c.rect.y = ny;
+
+                let (nx, ny) = (nx as i32, ny as i32);
                 self.conn
-                    .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+                    .configure_window(win, &ConfigureWindowAux::new().x(nx).y(ny))?;
                 self.conn.flush()?;
             }
         }

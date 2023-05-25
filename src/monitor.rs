@@ -56,6 +56,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             vis_info,
             bar_rect,
             theme::bar::PADDING,
+            theme::bar::SECTION_PADDING,
             WORKSPACE_CAP,
             layout_symbol,
             "",

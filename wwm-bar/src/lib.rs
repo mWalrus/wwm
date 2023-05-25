@@ -15,8 +15,6 @@ pub mod font;
 mod util;
 pub mod visual;
 
-const SECTION_PADDING: i16 = 10;
-
 #[derive(Debug)]
 enum Redraw {
     Tag(usize),
@@ -34,6 +32,7 @@ pub struct WBar {
     layout_symbol: RenderString,
     title: RenderString,
     section_dims: [Rect; 3],
+    section_padding: i16,
     colors: WBarColors,
     redraw_queue: Vec<Redraw>,
 }
@@ -70,6 +69,7 @@ impl WBar {
         vis_info: Rc<RenderVisualInfo>,
         rect: impl Into<Rect>,
         padding: u16,
+        section_padding: i16,
         taglen: usize,
         layout_symbol: impl ToString,
         title: impl ToString,
@@ -96,7 +96,6 @@ impl WBar {
                 .override_redirect(1),
         )
         .unwrap();
-
         let colors = WBarColors {
             fg: hex_to_rgba_color(colors[0]),
             bg: hex_to_rgba_color(colors[1]),
@@ -155,15 +154,15 @@ impl WBar {
         let section_dims = [
             Rect::new(0, 0, x_offset as u16, rect.h),
             Rect::new(
-                x_offset + SECTION_PADDING,
+                x_offset + section_padding as i16,
                 0,
                 layout_symbol.box_width,
                 rect.h,
             ),
             Rect::new(
-                x_offset + layout_symbol.box_width as i16 + SECTION_PADDING,
+                x_offset + layout_symbol.box_width as i16 + section_padding,
                 0,
-                rect.w - (x_offset + layout_symbol.box_width as i16 + SECTION_PADDING) as u16,
+                rect.w - (x_offset + layout_symbol.box_width as i16 + section_padding) as u16,
                 rect.h,
             ),
         ];
@@ -180,6 +179,7 @@ impl WBar {
             layout_symbol,
             title,
             section_dims,
+            section_padding,
             colors,
             redraw_queue: vec![
                 Redraw::Tag(0),
@@ -242,7 +242,7 @@ impl WBar {
 
         // FIXME: we need a cleaner solution for this
         let left_rect = &self.section_dims[1];
-        let new_x = left_rect.x + left_rect.w as i16 + SECTION_PADDING;
+        let new_x = left_rect.x + left_rect.w as i16 + self.section_padding;
         self.section_dims[2] =
             Rect::new(new_x, left_rect.y, self.rect.w - new_x as u16, self.rect.h);
 

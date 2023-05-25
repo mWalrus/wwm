@@ -12,8 +12,12 @@ pub mod theme {
         // these colors are the default fore-/background colors used across the entire bar
         pub const BG: u32 = 0x232634;
         pub const FG: u32 = 0xc6d0f5;
+        // font size in pixels
         pub const FONT_SIZE: f32 = 13.0;
-        // top/bottom padding around the text in the bar
+        // padding between sections in the bar in pixels.
+        // so: tags and layout indicator will have 10px between them
+        pub const SECTION_PADDING: i16 = 10;
+        // top/bottom padding around the text in the bar in pixles
         pub const PADDING: u16 = 5;
         // Only the name of the font family is required. Wwm uses fontconfig to discover
         // a monospaced font in that family and uses that for drawing text.

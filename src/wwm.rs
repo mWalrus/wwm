@@ -68,7 +68,7 @@ pub struct WinMan<'a, C: Connection> {
     focused_workspace: Rc<RefCell<WWorkspace>>,
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
-    drag_window: Option<(Window, ClientRect)>,
+    drag_window: Option<(Window, ClientRect, u32)>,
     keyboard: WKeyboard,
     mouse: WMouse,
     atoms: AtomCollection,
@@ -430,7 +430,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 && evt.root_x < c.rect.x.max(c.rect.x + c.rect.width as i16)
             {
                 c.is_floating = true;
-                self.drag_window = Some((c.window, c.rect));
+                self.drag_window = Some((c.window, c.rect, evt.time));
                 drop(c);
                 self.recompute_layout(&self.focused_monitor).unwrap();
             }
@@ -684,18 +684,23 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         // FIXME: this centers the window on the mouse position.
         //        I would like it to keep the offset to the mouse instead.
-        if let Some((win, mut rect)) = self.drag_window {
-            let (px, py) = (evt.event_x, evt.event_y);
-            let ClientRect { width, height, .. } = rect;
-            let x = px - (width as i16 / 2);
-            let y = py - (height as i16 / 2);
+        if let Some((win, rect, last_move)) = self.drag_window {
+            // limit to 60 fps
+            if evt.time - last_move <= (1000 / 60) {
+                return Ok(());
+            }
 
-            rect.x = x;
-            rect.y = y;
-
-            let (x, y) = (x as i32, y as i32);
             if let Some(c) = &self.focused_workspace.borrow_mut().find_client_by_win(win) {
-                c.borrow_mut().rect = rect;
+                let mut c = c.borrow_mut();
+                let (px, py) = (evt.event_x, evt.event_y);
+                let ClientRect { width, height, .. } = rect;
+                let x = px - (width as i16 / 2);
+                let y = py - (height as i16 / 2);
+
+                c.rect.x = x;
+                c.rect.y = y;
+
+                let (x, y) = (x as i32, y as i32);
                 self.conn
                     .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
                 self.conn.flush()?;

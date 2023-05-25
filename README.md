@@ -44,7 +44,7 @@ __Column layout__:
 - [x] Move clients between monitors and/or workspaces
 - [x] Respects floating clients such as dialog windows
 - [x] Move clients with mouse
-- [ ] Resize clients with mouse
+- [x] Resize clients with mouse
 - [x] Unfloat floating clients
 - [ ] Fullscreening
 

@@ -41,7 +41,7 @@ pub mod mouse {
     const MOD: ModMask = ModMask::M1;
 
     pub const DRAG_BUTTON: ButtonIndex = ButtonIndex::M1; // left mouse button
-    pub const RESIZE_BUTTON: ButtonIndex = ButtonIndex::M2; // right mouse button
+    pub const RESIZE_BUTTON: ButtonIndex = ButtonIndex::M3; // right mouse button
 
     pub fn setup_mousebinds() -> Vec<WMouseBind> {
         vec![

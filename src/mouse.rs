@@ -52,7 +52,7 @@ impl WMouse {
                 GrabMode::ASYNC,
                 0u32,
                 cur,
-                ButtonIndex::from(bind.button),
+                bind.button,
                 bind.mods,
             )
             .unwrap();
@@ -65,15 +65,15 @@ impl WMouse {
 #[derive(Debug)]
 pub struct WMouseBind {
     pub mods: ModMask,
-    pub button: u8,
+    pub button: ButtonIndex,
     pub action: WMouseCommand,
 }
 
 impl WMouseBind {
-    pub fn new<M: Into<ModMask>>(mods: M, button: impl Into<u8>, action: WMouseCommand) -> Self {
+    pub fn new<M: Into<ModMask>>(mods: M, button: ButtonIndex, action: WMouseCommand) -> Self {
         Self {
             mods: mods.into(),
-            button: button.into(),
+            button,
             action,
         }
     }

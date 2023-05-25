@@ -2,7 +2,9 @@ use crate::{
     client::{ClientRect, WClientState},
     command::{WKeyCommand, WMouseCommand},
     config::{
-        auto_start::AUTO_START_COMMANDS, mouse::DRAG_BUTTON, theme,
+        auto_start::AUTO_START_COMMANDS,
+        mouse::{DRAG_BUTTON, RESIZE_BUTTON},
+        theme::{self, window::BORDER_WIDTH},
         workspaces::WIDTH_ADJUSTMENT_FACTOR,
     },
     keyboard::WKeyboard,
@@ -69,6 +71,7 @@ pub struct WinMan<'a, C: Connection> {
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
     drag_window: Option<(Pos, Pos, u32)>,
+    resize_window: Option<u32>,
     keyboard: WKeyboard,
     mouse: WMouse,
     atoms: AtomCollection,
@@ -131,6 +134,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             focused_client: None, // we havent scanned windows yet so it's always None here
             pending_exposure: Default::default(),
             drag_window: None,
+            resize_window: None,
             keyboard,
             mouse,
             atoms,
@@ -409,41 +413,74 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let mut action = WMouseCommand::Idle;
         for bind in &self.mouse.binds {
-            if bind.button == evt.detail && bind.mods_as_key_but_mask() == evt.state {
+            if u8::from(bind.button) == evt.detail && bind.mods_as_key_but_mask() == evt.state {
                 action = bind.action;
                 break;
             }
         }
-        match action {
-            WMouseCommand::ResizeClient => {}
-            WMouseCommand::DragClient => self.drag_client(evt),
-            _ => {}
-        }
+
+        println!("got mouse action: {action:?}");
+
+        self.manipulate_client_dims(evt, action)?;
 
         Ok(())
     }
 
-    fn drag_client(&mut self, evt: ButtonPressEvent) {
+    fn manipulate_client_dims(
+        &mut self,
+        evt: ButtonPressEvent,
+        action: WMouseCommand,
+    ) -> Result<(), ReplyOrIdError> {
         if let Some(c) = &self.focused_client {
             let mut c = c.borrow_mut();
-            if self.drag_window.is_none()
-                && evt.root_x < c.rect.x.max(c.rect.x + c.rect.width as i16)
-            {
-                c.is_floating = true;
-                self.drag_window = Some((
-                    Pos::from(c.rect),
-                    Pos::new(evt.root_x, evt.root_y),
-                    evt.time,
-                ));
-                drop(c);
-                self.recompute_layout(&self.focused_monitor).unwrap();
+            // is outside
+            if evt.root_x > c.rect.x.max(c.rect.x + c.rect.width as i16) {
+                return Ok(());
             }
+
+            let mut should_recompute_layout = false;
+            match action {
+                WMouseCommand::DragClient if self.drag_window.is_none() => {
+                    self.drag_window = Some((
+                        Pos::from(c.rect),
+                        Pos::new(evt.root_x, evt.root_y),
+                        evt.time,
+                    ));
+                    should_recompute_layout = true;
+                }
+                WMouseCommand::ResizeClient if self.resize_window.is_none() => {
+                    self.conn.warp_pointer(
+                        NONE,
+                        c.window,
+                        0,
+                        0,
+                        0,
+                        0,
+                        (c.rect.width + BORDER_WIDTH) as i16,
+                        (c.rect.height + BORDER_WIDTH) as i16,
+                    )?;
+                    self.resize_window = Some(evt.time);
+                    should_recompute_layout = true;
+                }
+                _ => {}
+            }
+
+            if !should_recompute_layout {
+                return Ok(());
+            }
+
+            c.is_floating = true;
+            drop(c);
+            self.recompute_layout(&self.focused_monitor).unwrap();
         }
+        Ok(())
     }
 
     fn handle_button_release(&mut self, evt: ButtonReleaseEvent) -> Result<(), ReplyError> {
         if evt.detail == u8::from(DRAG_BUTTON) {
             self.drag_window = None;
+        } else if evt.detail == u8::from(RESIZE_BUTTON) {
+            self.resize_window = None;
         }
         Ok(())
     }
@@ -673,39 +710,77 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if mon.bar.has_pointer(evt.root_x, evt.root_y) {
             return Ok(());
         }
-        // skip monitor focus change if a window is being dragged
-        if !mon.has_pointer(&evt) && self.drag_window.is_none() {
-            drop(mon); // drop borrow before method call
+
+        let mon_has_pointer = mon.has_pointer(&evt);
+        drop(mon);
+
+        // skip monitor focus change if a window is being manipulated
+        if !mon_has_pointer && self.drag_window.is_none() && self.resize_window.is_none() {
             self.focus_at_pointer(&evt)?;
         }
 
-        if let Some((oc_pos, op_pos, last_move)) = self.drag_window {
-            if let Some(c) = &self.focused_client {
-                let mut c = c.borrow_mut();
+        if let Some(drag_info) = self.drag_window {
+            self.mouse_move(drag_info, evt)?;
+        }
 
-                if c.is_fullscreen {
-                    return Ok(());
-                }
+        if let Some(last_time) = self.resize_window {
+            self.mouse_resize(last_time, evt)?;
+        }
 
-                if evt.time - last_move <= (1000 / 60) {
-                    return Ok(());
-                }
+        Ok(())
+    }
 
-                let pdx = evt.root_x - op_pos.x;
-                let pdy = evt.root_y - op_pos.y;
-                let nx = oc_pos.x + pdx;
-                let ny = oc_pos.y + pdy;
+    fn mouse_resize(
+        &mut self,
+        last_resize: u32,
+        ev: MotionNotifyEvent,
+    ) -> Result<(), ReplyOrIdError> {
+        if let Some(c) = &self.focused_client {
+            let mut c = c.borrow_mut();
 
-                c.rect.x = nx;
-                c.rect.y = ny;
-
-                let (nx, ny) = (nx as i32, ny as i32);
-                self.conn
-                    .configure_window(c.window, &ConfigureWindowAux::new().x(nx).y(ny))?;
-                self.conn.flush()?;
+            if c.is_fullscreen || ev.time - last_resize <= (1000 / 60) {
+                return Ok(());
             }
 
-            // limit to 60 fps
+            let nw = 1.max(ev.root_x - c.rect.x - (2 * BORDER_WIDTH as i16) + 1);
+            let nh = 1.max(ev.root_y - c.rect.y - (2 * BORDER_WIDTH as i16) + 1);
+
+            c.rect.width = nw as u16;
+            c.rect.height = nh as u16;
+
+            self.conn.configure_window(
+                c.window,
+                &ConfigureWindowAux::new().width(nw as u32).height(nh as u32),
+            )?;
+            self.conn.flush()?;
+        }
+        Ok(())
+    }
+
+    fn mouse_move(
+        &mut self,
+        (oc_pos, op_pos, last_move): (Pos, Pos, u32),
+        ev: MotionNotifyEvent,
+    ) -> Result<(), ReplyOrIdError> {
+        if let Some(c) = &self.focused_client {
+            let mut c = c.borrow_mut();
+
+            if c.is_fullscreen || ev.time - last_move <= (1000 / 60) {
+                return Ok(());
+            }
+
+            let pdx = ev.root_x - op_pos.x;
+            let pdy = ev.root_y - op_pos.y;
+            let nx = oc_pos.x + pdx;
+            let ny = oc_pos.y + pdy;
+
+            c.rect.x = nx;
+            c.rect.y = ny;
+
+            let (nx, ny) = (nx as i32, ny as i32);
+            self.conn
+                .configure_window(c.window, &ConfigureWindowAux::new().x(nx).y(ny))?;
+            self.conn.flush()?;
         }
         Ok(())
     }

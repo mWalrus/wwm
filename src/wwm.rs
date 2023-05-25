@@ -68,7 +68,7 @@ pub struct WinMan<'a, C: Connection> {
     focused_workspace: Rc<RefCell<WWorkspace>>,
     focused_client: Option<Rc<RefCell<WClientState>>>,
     pending_exposure: HashSet<Window>,
-    drag_window: Option<(Window, Pos, Pos, u32)>,
+    drag_window: Option<(Pos, Pos, u32)>,
     keyboard: WKeyboard,
     mouse: WMouse,
     atoms: AtomCollection,
@@ -431,7 +431,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             {
                 c.is_floating = true;
                 self.drag_window = Some((
-                    c.window,
                     Pos::from(c.rect),
                     Pos::new(evt.root_x, evt.root_y),
                     evt.time,
@@ -680,23 +679,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.focus_at_pointer(&evt)?;
         }
 
-        if let Some(c) = &self.focused_client {
-            let c = c.borrow();
-            if c.is_fullscreen {
-                return Ok(());
-            }
-        }
-
-        // FIXME: this centers the window on the mouse position.
-        //        I would like it to keep the offset to the mouse instead.
-        if let Some((win, oc_pos, op_pos, last_move)) = self.drag_window {
-            // limit to 60 fps
-            if evt.time - last_move <= (1000 / 60) {
-                return Ok(());
-            }
-
-            if let Some(c) = &self.focused_workspace.borrow_mut().find_client_by_win(win) {
+        if let Some((oc_pos, op_pos, last_move)) = self.drag_window {
+            if let Some(c) = &self.focused_client {
                 let mut c = c.borrow_mut();
+
+                if c.is_fullscreen {
+                    return Ok(());
+                }
+
+                if evt.time - last_move <= (1000 / 60) {
+                    return Ok(());
+                }
 
                 let pdx = evt.root_x - op_pos.x;
                 let pdy = evt.root_y - op_pos.y;
@@ -708,9 +701,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
                 let (nx, ny) = (nx as i32, ny as i32);
                 self.conn
-                    .configure_window(win, &ConfigureWindowAux::new().x(nx).y(ny))?;
+                    .configure_window(c.window, &ConfigureWindowAux::new().x(nx).y(ny))?;
                 self.conn.flush()?;
             }
+
+            // limit to 60 fps
         }
         Ok(())
     }

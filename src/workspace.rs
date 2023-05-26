@@ -70,7 +70,7 @@ impl WWorkspace {
     pub fn hide_clients<C: Connection>(&self, conn: &C) -> Result<(), ReplyOrIdError> {
         for c in self.clients.inner().iter() {
             let c = c.borrow();
-            let aux = ConfigureWindowAux::new().x(c.rect.width as i32 * -2);
+            let aux = ConfigureWindowAux::new().x(c.rect.w as i32 * -2);
             conn.configure_window(c.window, &aux)?;
         }
         conn.flush()?;

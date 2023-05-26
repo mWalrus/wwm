@@ -3,14 +3,66 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
-    client::{ClientRect, WClientState},
-    config,
-};
+use crate::{client::WClientState, config, monitor::WMonitor};
 
 pub type ClientCell = Rc<RefCell<WClientState>>;
 
 use thiserror::Error;
+use x11rb::{
+    connection::Connection,
+    protocol::xproto::{ConfigureWindowAux, GetGeometryReply, MotionNotifyEvent},
+};
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Rect {
+    pub x: i16,
+    pub y: i16,
+    pub w: u16,
+    pub h: u16,
+}
+
+impl From<&GetGeometryReply> for Rect {
+    fn from(g: &GetGeometryReply) -> Self {
+        Self {
+            x: g.x,
+            y: g.y,
+            w: g.width,
+            h: g.height,
+        }
+    }
+}
+
+impl<C: Connection> From<&WMonitor<'_, C>> for Rect {
+    fn from(m: &WMonitor<C>) -> Self {
+        Self {
+            x: m.x,
+            y: m.y,
+            w: m.width,
+            h: m.height,
+        }
+    }
+}
+
+impl From<Rect> for ConfigureWindowAux {
+    fn from(cr: Rect) -> Self {
+        ConfigureWindowAux::new()
+            .x(cr.x as i32)
+            .y(cr.y as i32)
+            .width(cr.w as u32)
+            .height(cr.h as u32)
+    }
+}
+
+impl Rect {
+    pub fn new(x: i16, y: i16, width: u16, height: u16) -> Self {
+        Self {
+            x,
+            y,
+            w: width,
+            h: height,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct Pos {
@@ -18,11 +70,20 @@ pub struct Pos {
     pub y: i16,
 }
 
-impl From<ClientRect> for Pos {
-    fn from(value: ClientRect) -> Self {
+impl From<Rect> for Pos {
+    fn from(value: Rect) -> Self {
         Self {
             x: value.x,
             y: value.y,
+        }
+    }
+}
+
+impl From<&MotionNotifyEvent> for Pos {
+    fn from(value: &MotionNotifyEvent) -> Self {
+        Self {
+            x: value.event_x,
+            y: value.event_y,
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    client::{ClientRect, WClientState},
+    client::WClientState,
     command::{WKeyCommand, WMouseCommand},
     config::{
         auto_start::AUTO_START_COMMANDS,
@@ -11,7 +11,7 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, ClientCell, Pos, WDirection, WVec},
+    util::{self, ClientCell, Pos, Rect, WDirection, WVec},
     workspace::WWorkspace,
     AtomCollection,
 };
@@ -358,7 +358,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn focus_at_pointer(&mut self, evt: &MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
         self.monitors
-            .find_and_select(|m| m.borrow().has_pointer(evt));
+            .find_and_select(|m| m.borrow().has_pos(Pos::from(evt)));
         self.unfocus()?;
         self.focused_monitor = self.monitors.selected().unwrap();
         self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
@@ -434,7 +434,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         if let Some(c) = &self.focused_client {
             let mut c = c.borrow_mut();
             // is outside
-            if evt.root_x > c.rect.x.max(c.rect.x + c.rect.width as i16) {
+            if evt.root_x > c.rect.x.max(c.rect.x + c.rect.w as i16) {
                 return Ok(());
             }
 
@@ -456,8 +456,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                         0,
                         0,
                         0,
-                        (c.rect.width + BORDER_WIDTH - 1) as i16,
-                        (c.rect.height + BORDER_WIDTH - 1) as i16,
+                        (c.rect.w + BORDER_WIDTH - 1) as i16,
+                        (c.rect.h + BORDER_WIDTH - 1) as i16,
                     )?;
                     self.resize_window = Some(evt.time);
                     should_recompute_layout = true;
@@ -507,6 +507,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyOrIdError> {
+        if self.resize_window.is_some() || self.drag_window.is_some() {
+            return Ok(());
+        }
+
         if self.ignore_enter {
             self.ignore_enter = false;
             return Ok(());
@@ -614,7 +618,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn unfloat_focused_client(&mut self) -> Result<(), ReplyOrIdError> {
         if let Some(c) = &self.focused_client {
             if c.borrow().is_floating {
-                c.borrow_mut().is_floating = false;
+                let mut c = c.borrow_mut();
+                c.is_floating = false;
+                let mon = self.focused_monitor.borrow();
+                let pos = Pos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
+                if let Some(dir) = mon.find_adjacent_monitor(pos) {
+                    drop(c);
+                    drop(mon);
+                    self.move_client_to_monitor(dir).unwrap();
+                }
                 self.recompute_layout(&self.focused_monitor)?;
                 self.warp_pointer_to_focused_client()?;
             }
@@ -717,7 +729,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        let mon_has_pointer = mon.has_pointer(&evt);
+        let mon_has_pointer = mon.has_pos(Pos::from(&evt));
         drop(mon);
 
         // skip monitor focus change if a window is being manipulated
@@ -748,19 +760,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 return Ok(());
             }
 
-            // FIXME: mouse moves outside window and starts resizing below windows
-            //        if there are any.
             let nw = 1.max(ev.root_x - c.rect.x - (2 * BORDER_WIDTH as i16) + 1);
             let nh = 1.max(ev.root_y - c.rect.y - (2 * BORDER_WIDTH as i16) + 1);
 
-            c.rect.width = nw as u16;
-            c.rect.height = nh as u16;
+            c.rect.w = nw as u16;
+            c.rect.h = nh as u16;
 
-            self.conn.configure_window(
-                c.window,
-                &ConfigureWindowAux::new().width(nw as u32).height(nh as u32),
-            )?;
-            self.conn.flush()?;
+            if c.is_floating {
+                self.conn.configure_window(
+                    c.window,
+                    &ConfigureWindowAux::new().width(nw as u32).height(nh as u32),
+                )?;
+            }
         }
         Ok(())
     }
@@ -905,7 +916,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .borrow_mut()
             .push_client(WClientState::new(
                 win,
-                ClientRect::new(x, y, geom.width, geom.height),
+                Rect::new(x, y, geom.width, geom.height),
                 is_floating,
                 is_fullscreen,
             ));
@@ -1154,8 +1165,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 0,
                 0,
                 0,
-                c.rect.width as i16 / 2,
-                c.rect.height as i16 / 2,
+                c.rect.w as i16 / 2,
+                c.rect.h as i16 / 2,
             )?;
         }
         Ok(())

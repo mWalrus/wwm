@@ -3,16 +3,13 @@ use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
 use wwm_bar::{font::FontDrawer, visual::RenderVisualInfo, WBar};
 use x11rb::{
     connection::Connection,
-    protocol::{
-        randr::MonitorInfo,
-        xproto::{MotionNotifyEvent, Rectangle},
-    },
+    protocol::{randr::MonitorInfo, xproto::Rectangle},
 };
 
 use crate::{
     client::WClientState,
     config::{theme, workspaces::WORKSPACE_CAP},
-    util::{StateError, WDirection, WVec},
+    util::{Pos, StateError, WDirection, WVec},
     workspace::WWorkspace,
 };
 
@@ -92,10 +89,19 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         self.workspaces.selected().unwrap()
     }
 
-    pub fn has_pointer(&self, e: &MotionNotifyEvent) -> bool {
-        let has_x = e.event_x >= self.x && e.event_x <= self.x + self.width as i16;
-        let has_y = e.event_y >= self.y && e.event_y <= self.y + self.height as i16;
+    pub fn has_pos(&self, p: Pos) -> bool {
+        let has_x = p.x >= self.x && p.x <= self.x + self.width as i16;
+        let has_y = p.y >= self.y && p.y <= self.y + self.height as i16;
         has_x && has_y
+    }
+
+    pub fn find_adjacent_monitor(&self, p: Pos) -> Option<WDirection> {
+        if p.x < self.x {
+            return Some(WDirection::Prev);
+        } else if p.x > self.x + self.width as i16 {
+            return Some(WDirection::Next);
+        }
+        None
     }
 
     pub fn is_focused_workspace(&self, idx: usize) -> bool {

@@ -3,10 +3,9 @@ use std::{cmp::Ordering, fmt};
 use x11rb::connection::Connection;
 
 use crate::{
-    client::ClientRect,
     config::theme::window::BORDER_WIDTH,
     monitor::WMonitor,
-    util::{bar_height, ClientCell},
+    util::{bar_height, ClientCell, Rect},
 };
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
@@ -33,7 +32,7 @@ pub fn layout_clients<C: Connection>(
     width_factor: f32,
     monitor: &WMonitor<C>,
     clients: &Vec<&ClientCell>,
-) -> Option<Vec<ClientRect>> {
+) -> Option<Vec<Rect>> {
     if clients.is_empty() {
         return None;
     }
@@ -51,7 +50,7 @@ fn tile<C: Connection>(
     mon: &WMonitor<C>,
     width_factor: f32,
     clients: &Vec<&ClientCell>,
-) -> Vec<ClientRect> {
+) -> Vec<Rect> {
     if clients.len() == 1 {
         return single_client(mon);
     }
@@ -60,7 +59,7 @@ fn tile<C: Connection>(
 
     let mut rects = vec![];
 
-    rects.push(ClientRect::new(
+    rects.push(Rect::new(
         mon.x,
         mon.y,
         main_width - BORDER_WIDTH * 2,
@@ -85,7 +84,7 @@ fn tile<C: Connection>(
             }
         }
 
-        rects.push(ClientRect::new(
+        rects.push(Rect::new(
             mon.x + main_width as i16,
             cy,
             mon.width - main_width - (BORDER_WIDTH * 2),
@@ -96,14 +95,14 @@ fn tile<C: Connection>(
     rects
 }
 
-fn col<C: Connection>(mon: &WMonitor<C>, clients: &Vec<&ClientCell>) -> Vec<ClientRect> {
+fn col<C: Connection>(mon: &WMonitor<C>, clients: &Vec<&ClientCell>) -> Vec<Rect> {
     if clients.len() == 1 {
         return single_client(mon);
     }
     let mut rects = vec![];
     let client_width = mon.width / clients.len() as u16;
     for i in 0..clients.len() {
-        rects.push(ClientRect::new(
+        rects.push(Rect::new(
             mon.x + (i as i16 * client_width as i16),
             mon.y,
             client_width - (BORDER_WIDTH * 2),
@@ -113,8 +112,8 @@ fn col<C: Connection>(mon: &WMonitor<C>, clients: &Vec<&ClientCell>) -> Vec<Clie
     rects
 }
 
-fn single_client<C: Connection>(mon: &WMonitor<C>) -> Vec<ClientRect> {
-    vec![ClientRect::new(
+fn single_client<C: Connection>(mon: &WMonitor<C>) -> Vec<Rect> {
+    vec![Rect::new(
         mon.x,
         mon.y,
         mon.width - BORDER_WIDTH * 2,

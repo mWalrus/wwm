@@ -772,8 +772,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 c.is_floating = false;
                 let mon = self.focused_monitor.borrow();
                 let pos = Pos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
+                drop(c);
                 if let Some(dir) = mon.find_adjacent_monitor(pos) {
-                    drop(c);
                     drop(mon);
                     self.move_client_to_monitor(dir).unwrap();
                 }

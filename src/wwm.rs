@@ -11,12 +11,12 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, ClientCell, Pos, Rect, WDirection, WVec},
+    util::{self, ClientCell, Pos, Rect, Size, WDirection, WVec},
     workspace::WWorkspace,
     AtomCollection,
 };
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell, RefMut},
     collections::HashSet,
     process::{exit, Command},
     rc::Rc,
@@ -31,14 +31,16 @@ use wwm_bar::{
 };
 use x11rb::{
     connection::Connection,
+    properties::WmSizeHints,
     protocol::{
         randr::ConnectionExt as _,
         xproto::{
             ButtonPressEvent, ButtonReleaseEvent, ChangeWindowAttributesAux, ClientMessageEvent,
-            CloseDown, ConfigureRequestEvent, ConfigureWindowAux, ConnectionExt,
-            DestroyNotifyEvent, EnterNotifyEvent, EventMask, ExposeEvent, GetGeometryReply,
-            InputFocus, KeyPressEvent, MapRequestEvent, MapState, MotionNotifyEvent, PropMode,
-            PropertyNotifyEvent, Screen, SetMode, StackMode, UnmapNotifyEvent, Window,
+            CloseDown, ConfigureNotifyEvent, ConfigureRequestEvent, ConfigureWindowAux,
+            ConnectionExt, DestroyNotifyEvent, EnterNotifyEvent, EventMask, ExposeEvent,
+            GetGeometryReply, InputFocus, KeyPressEvent, MapRequestEvent, MapState,
+            MotionNotifyEvent, PropMode, PropertyNotifyEvent, Screen, SetMode, StackMode,
+            UnmapNotifyEvent, Window,
         },
         ErrorKind, Event,
     },
@@ -482,6 +484,154 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
+    fn apply_size_hints(
+        &self,
+        c: &RefMut<'_, WClientState>,
+        mut x: i16,
+        mut y: i16,
+        mut w: u16,
+        mut h: u16,
+        interact: bool,
+    ) -> bool {
+        let mon = self.focused_monitor.borrow();
+
+        w = w.min(1);
+        h = h.min(1);
+
+        let (sw, sh) = (
+            self.screen.width_in_pixels as i16,
+            self.screen.height_in_pixels as i16,
+        );
+
+        if interact {
+            if x > sw {
+                x = sw - c.width() as i16;
+            }
+            if y > sh {
+                y = sh - c.height() as i16;
+            }
+            if (x + w as i16 + 2 * c.bw as i16) < 0 {
+                x = 0;
+            }
+            if (y + h as i16 + 2 * c.bw as i16) < 0 {
+                y = 0;
+            }
+        } else {
+            if x >= mon.x + mon.width as i16 {
+                x = mon.x + mon.width as i16 - c.width() as i16;
+            }
+            if y >= mon.y + mon.height as i16 {
+                y = mon.y + mon.height as i16 - c.height() as i16;
+            }
+            if (x + w as i16 + 2 * c.bw as i16) <= mon.x {
+                x = mon.x;
+            }
+            if (y + h as i16 + 2 * c.bw as i16) <= mon.y {
+                y = mon.y;
+            }
+        }
+        let bh = util::bar_height();
+        if h < bh {
+            h = bh;
+        }
+        if w < bh {
+            w = bh;
+        }
+        if c.is_floating {
+            if !c.hints_valid {
+                // FIXME: error handling
+                self.update_size_hints().unwrap();
+            }
+
+            // ICCCM 4.1.2.3
+            let base_is_min = c.base_size.w == c.min_size.w && c.base_size.h == c.min_size.h;
+            if base_is_min {
+                w -= c.base_size.w;
+                h -= c.base_size.h;
+            }
+
+            if c.mina > 0f32 && c.maxa > 0f32 {
+                if c.maxa < w as f32 / h as f32 {
+                    w = (h as f32 * c.maxa + 0.5) as u16;
+                }
+                if c.mina < h as f32 / w as f32 {
+                    h = (w as f32 * c.mina + 0.5) as u16;
+                }
+            }
+            if base_is_min {
+                w -= c.base_size.w;
+                h -= c.base_size.h;
+            }
+
+            if c.inc_size.w > 0 {
+                w -= w % c.inc_size.w;
+            }
+            if c.inc_size.h > 0 {
+                h -= h % c.inc_size.h;
+            }
+
+            w = c.min_size.w.max(w + c.base_size.w);
+            h = c.min_size.h.max(h + c.base_size.h);
+
+            if c.max_size.w > 0 {
+                w = w.min(c.max_size.w)
+            }
+            if c.max_size.h > 0 {
+                h = h.min(c.max_size.h);
+            }
+        }
+
+        x != c.rect.x || y != c.rect.y || w != c.rect.w || h != c.rect.h
+    }
+
+    fn update_size_hints(&self) -> Result<(), ReplyOrIdError> {
+        if let Some(c) = &self.focused_client {
+            let mut c = c.borrow_mut();
+            let wm_size_hints = WmSizeHints::get_normal_hints(self.conn, c.window)?.reply()?;
+
+            if let Some(bs) = wm_size_hints.base_size {
+                c.base_size = bs.into();
+            } else if let Some(ms) = wm_size_hints.min_size {
+                c.base_size = ms.into();
+            } else {
+                c.base_size = Size::default();
+            }
+
+            if let Some(is) = wm_size_hints.size_increment {
+                c.inc_size = is.into();
+            } else {
+                c.inc_size = Size::default();
+            }
+
+            if let Some(ms) = wm_size_hints.max_size {
+                c.max_size = ms.into();
+            } else {
+                c.max_size = Size::default();
+            }
+
+            if let Some(ms) = wm_size_hints.min_size {
+                c.min_size = ms.into();
+            } else {
+                c.min_size = Size::default();
+            }
+
+            if let Some((min_a, max_a)) = wm_size_hints.aspect {
+                c.mina = min_a.numerator as f32 / min_a.denominator as f32;
+                c.maxa = max_a.numerator as f32 / max_a.denominator as f32;
+            } else {
+                c.mina = 0f32;
+                c.maxa = 0f32;
+            }
+
+            c.is_fixed = c.max_size.w > 0
+                && c.max_size.h > 0
+                && c.max_size.w == c.min_size.w
+                && c.max_size.h == c.min_size.h;
+            c.hints_valid = true;
+        }
+        Ok(())
+    }
+
     fn handle_button_release(&mut self, evt: ButtonReleaseEvent) -> Result<(), ReplyError> {
         if evt.detail == u8::from(DRAG_BUTTON) {
             self.drag_window = None;
@@ -754,25 +904,75 @@ impl<'a, C: Connection> WinMan<'a, C> {
         ev: MotionNotifyEvent,
     ) -> Result<(), ReplyOrIdError> {
         if let Some(c) = &self.focused_client {
-            let mut c = c.borrow_mut();
+            let c = c.borrow_mut();
 
             if c.is_fullscreen || ev.time - last_resize <= (1000 / 60) {
                 return Ok(());
             }
 
-            let nw = 1.max(ev.root_x - c.rect.x - (2 * BORDER_WIDTH as i16) + 1);
-            let nh = 1.max(ev.root_y - c.rect.y - (2 * BORDER_WIDTH as i16) + 1);
-
-            c.rect.w = nw as u16;
-            c.rect.h = nh as u16;
-
             if c.is_floating {
-                self.conn.configure_window(
-                    c.window,
-                    &ConfigureWindowAux::new().width(nw as u32).height(nh as u32),
-                )?;
+                let nw = 1.max(ev.root_x - c.rect.x - (2 * BORDER_WIDTH as i16) + 1) as u16;
+                let nh = 1.max(ev.root_y - c.rect.y - (2 * BORDER_WIDTH as i16) + 1) as u16;
+
+                // copy before drop
+                let x = c.rect.x;
+                let y = c.rect.y;
+
+                self.resize(c, x, y, nw, nh, true)?;
             }
         }
+        Ok(())
+    }
+
+    fn resize(
+        &self,
+        c: RefMut<'_, WClientState>,
+        x: i16,
+        y: i16,
+        w: u16,
+        h: u16,
+        interact: bool,
+    ) -> Result<(), ReplyOrIdError> {
+        if self.apply_size_hints(&c, x, y, w, h, interact) {
+            self.resize_client(c, x, y, w, h)?;
+        }
+
+        Ok(())
+    }
+
+    fn resize_client(
+        &self,
+        mut c: RefMut<'_, WClientState>,
+        x: i16,
+        y: i16,
+        w: u16,
+        h: u16,
+    ) -> Result<(), ReplyOrIdError> {
+        c.rect = Rect::new(x, y, w, h);
+
+        self.conn.configure_window(
+            c.window,
+            &ConfigureWindowAux::new()
+                .x(x as i32)
+                .y(y as i32)
+                .width(w as u32)
+                .height(h as u32),
+        )?;
+
+        let mut ce = ConfigureNotifyEvent::default();
+        ce.response_type = 22; // ConfigureNotify
+        ce.event = c.window;
+        ce.window = c.window;
+        ce.x = c.rect.x;
+        ce.y = c.rect.y;
+        ce.width = c.rect.w;
+        ce.height = c.rect.h;
+        ce.border_width = BORDER_WIDTH;
+        ce.override_redirect = false;
+        self.conn
+            .send_event(false, c.window, EventMask::STRUCTURE_NOTIFY, ce)?;
+
+        self.conn.sync()?;
         Ok(())
     }
 
@@ -928,6 +1128,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.unfocus()?;
         self.focus()?;
+        self.update_size_hints()?;
         self.warp_pointer_to_focused_client()?;
 
         Ok(())
@@ -967,14 +1168,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         for (client, rect) in non_floating_clients.iter().zip(rects.unwrap()) {
-            let client_aux = ConfigureWindowAux::from(rect)
-                .sibling(None)
-                .stack_mode(None);
-
-            let mut c = client.borrow_mut();
-            c.rect = rect;
-
-            self.conn.configure_window(c.window, &client_aux)?;
+            self.resize(client.borrow_mut(), rect.x, rect.y, rect.w, rect.h, false)?;
         }
         Ok(())
     }

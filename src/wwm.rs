@@ -16,7 +16,7 @@ use crate::{
     AtomCollection,
 };
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::{RefCell, RefMut},
     collections::HashSet,
     process::{exit, Command},
     rc::Rc,
@@ -120,6 +120,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         monitors.find_and_select(|m| m.borrow().primary);
         let focused_monitor = monitors.selected().unwrap();
+        focused_monitor.borrow_mut().bar.set_is_focused(true);
 
         let focused_workspace = {
             let mon = focused_monitor.borrow();
@@ -229,9 +230,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
+    // FIXME: take monitor and workspace affected
     fn detach(&mut self, window: Window) {
         let conn = self.conn;
 
+        let mut ws_idx = None;
         let mut ws = self.focused_workspace.borrow_mut();
         ws.clients.retain(|client| {
             let c = client.borrow();
@@ -242,8 +245,21 @@ impl<'a, C: Connection> WinMan<'a, C> {
             conn.grab_server().unwrap();
             conn.change_save_set(SetMode::DELETE, c.window).unwrap();
             conn.ungrab_server().unwrap();
+
+            ws_idx = Some(c.workspace);
+
             false
         });
+
+        if ws.clients.is_empty() {
+            if let Some(i) = ws_idx {
+                self.focused_monitor
+                    .borrow_mut()
+                    .bar
+                    .set_has_clients(i, false);
+            }
+        }
+
         self.focused_client = None;
     }
 
@@ -348,6 +364,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.focused_workspace = mon.borrow().focused_workspace();
         self.focused_client = self.focused_workspace.borrow().focused_client();
+
+        // swap bar focus
+        self.focused_monitor.borrow_mut().bar.set_is_focused(false);
+        mon.borrow_mut().bar.set_is_focused(true);
+
         self.focused_monitor = mon;
 
         self.warp_pointer_to_focused_monitor().unwrap();
@@ -767,19 +788,22 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn unfloat_focused_client(&mut self) -> Result<(), ReplyOrIdError> {
         if let Some(c) = &self.focused_client {
-            if c.borrow().is_floating {
-                let mut c = c.borrow_mut();
-                c.is_floating = false;
-                let mon = self.focused_monitor.borrow();
-                let pos = Pos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
-                drop(c);
-                if let Some(dir) = mon.find_adjacent_monitor(pos) {
-                    drop(mon);
-                    self.move_client_to_monitor(dir).unwrap();
-                }
-                self.recompute_layout(&self.focused_monitor)?;
-                self.warp_pointer_to_focused_client()?;
+            let mut c = c.borrow_mut();
+            if !c.is_floating {
+                return Ok(());
             }
+
+            c.is_floating = false;
+            let pos = Pos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
+            drop(c);
+
+            let mon = self.focused_monitor.borrow();
+            if let Some(dir) = mon.find_adjacent_monitor(pos) {
+                drop(mon);
+                self.move_client_to_monitor(dir).unwrap();
+            }
+            self.recompute_layout(&self.focused_monitor)?;
+            self.warp_pointer_to_focused_client()?;
         }
         Ok(())
     }
@@ -816,10 +840,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.unfocus()?;
 
-        if let Some(removed) = self.focused_workspace.borrow_mut().remove_focused() {
+        if let Some(mut removed) = self.focused_workspace.borrow_mut().remove_focused() {
             let mut m = self.monitors.get_mut(idx).unwrap();
             let ws_idx = m.workspaces.index();
+            removed.workspace = ws_idx;
+            removed.monitor = idx;
 
+            m.bar.set_has_clients(ws_idx, true);
             m.add_client_to_workspace(ws_idx, removed);
         }
 
@@ -843,7 +870,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         self.unfocus()?;
-        if let Some(removed) = self.focused_workspace.borrow_mut().remove_focused() {
+        if let Some(mut removed) = self.focused_workspace.borrow_mut().remove_focused() {
+            removed.workspace = ws_idx;
             self.focused_monitor
                 .borrow_mut()
                 .add_client_to_workspace(ws_idx, removed);
@@ -914,7 +942,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 let nw = 1.max(ev.root_x - c.rect.x - (2 * BORDER_WIDTH as i16) + 1) as u16;
                 let nh = 1.max(ev.root_y - c.rect.y - (2 * BORDER_WIDTH as i16) + 1) as u16;
 
-                // copy before drop
+                // copy before move
                 let x = c.rect.x;
                 let y = c.rect.y;
 
@@ -1112,6 +1140,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.configure_window(win, &conf_aux)?;
         self.conn.change_window_attributes(win, &change_aux)?;
 
+        let ws_idx = self.focused_monitor.borrow().workspaces.index();
+        let mon_idx = self.monitors.index();
         self.focused_workspace
             .borrow_mut()
             .push_client(WClientState::new(
@@ -1119,6 +1149,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 Rect::new(x, y, geom.width, geom.height),
                 is_floating,
                 is_fullscreen,
+                ws_idx,
+                mon_idx,
             ));
         self.set_client_state(win, WindowState::Normal)?;
 
@@ -1128,6 +1160,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.unfocus()?;
         self.focus()?;
+
+        {
+            let mut m = self.focused_monitor.borrow_mut();
+            let ws_idx = m.workspaces.index();
+            m.bar.set_has_clients(ws_idx, true);
+        }
+
         self.update_size_hints()?;
         self.warp_pointer_to_focused_client()?;
 
@@ -1308,6 +1347,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.sync()?;
             self.conn.ungrab_server()?;
         }
+
+        // FIXME: this has to be reworked if a client gets unmanaged on a
+        //        non-focused workspace or monitor
         self.focus()?;
         self.update_client_list()?;
         self.recompute_layout(&self.focused_monitor)?;

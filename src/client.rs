@@ -20,10 +20,19 @@ pub struct WClientState {
     pub inc_size: Size,
     pub maxa: f32,
     pub mina: f32,
+    pub workspace: usize,
+    pub monitor: usize,
 }
 
 impl WClientState {
-    pub fn new(window: Window, rect: Rect, is_floating: bool, is_fullscreen: bool) -> Self {
+    pub fn new(
+        window: Window,
+        rect: Rect,
+        is_floating: bool,
+        is_fullscreen: bool,
+        workspace: usize,
+        monitor: usize,
+    ) -> Self {
         Self {
             window,
             rect,
@@ -38,6 +47,8 @@ impl WClientState {
             inc_size: Size::default(),
             maxa: 0f32,
             mina: 0f32,
+            workspace,
+            monitor,
         }
     }
 

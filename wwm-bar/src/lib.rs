@@ -7,7 +7,10 @@ use x11rb::{
     connection::Connection,
     protocol::{
         render::{Color, ConnectionExt as _, CreatePictureAux, Picture, PolyEdge, PolyMode},
-        xproto::{BackingStore, ConnectionExt, CreateWindowAux, EventMask, Window, WindowClass},
+        xproto::{
+            BackingStore, ConnectionExt, CreateGCAux, CreateWindowAux, EventMask, Gcontext,
+            LineStyle, Rectangle, Window, WindowClass,
+        },
     },
 };
 
@@ -35,6 +38,9 @@ pub struct WBar {
     section_padding: i16,
     colors: WBarColors,
     redraw_queue: Vec<Redraw>,
+    has_client_gc: Gcontext,
+    has_client_gc_selected: Gcontext,
+    is_focused: bool,
 }
 
 struct WBarColors {
@@ -44,20 +50,23 @@ struct WBarColors {
     bg_selected: Color,
 }
 
+#[derive(Debug)]
 pub struct WWorkspaceTag {
     id: usize,
     text: RenderString,
     rect: Rect,
     selected: bool,
+    has_clients: bool,
 }
 
 impl WWorkspaceTag {
-    fn new(id: usize, text: RenderString, rect: Rect, selected: bool) -> Self {
+    fn new(id: usize, text: RenderString, rect: Rect, selected: bool, has_clients: bool) -> Self {
         Self {
             id,
             text,
             rect,
             selected,
+            has_clients,
         }
     }
 }
@@ -96,12 +105,39 @@ impl WBar {
                 .override_redirect(1),
         )
         .unwrap();
+
+        let fg = colors[0];
+        let fg_selected = colors[3];
+
         let colors = WBarColors {
             fg: hex_to_rgba_color(colors[0]),
             bg: hex_to_rgba_color(colors[1]),
             bg_selected: hex_to_rgba_color(colors[2]),
             fg_selected: hex_to_rgba_color(colors[3]),
         };
+
+        let has_client_gc = conn.generate_id().unwrap();
+        let has_client_gc_selected = conn.generate_id().unwrap();
+
+        conn.create_gc(
+            has_client_gc,
+            bar_win,
+            &CreateGCAux::new()
+                .foreground(fg)
+                .line_width(1)
+                .line_style(LineStyle::SOLID),
+        )
+        .unwrap();
+
+        conn.create_gc(
+            has_client_gc_selected,
+            bar_win,
+            &CreateGCAux::new()
+                .foreground(fg_selected)
+                .line_width(1)
+                .line_style(LineStyle::SOLID),
+        )
+        .unwrap();
 
         let mut tags = Vec::with_capacity(taglen);
         let mut x_offset = 0;
@@ -119,7 +155,7 @@ impl WBar {
             let tag_rect = Rect::new(x_offset, rect.y, text.box_width as u16, rect.h);
             x_offset += text.box_width as i16;
 
-            tags.push(WWorkspaceTag::new(i, text, tag_rect, i == 0));
+            tags.push(WWorkspaceTag::new(i, text, tag_rect, i == 0, false));
         }
 
         let picture = conn.generate_id().unwrap();
@@ -194,6 +230,9 @@ impl WBar {
                 Redraw::LayoutSymbol,
                 Redraw::Title,
             ],
+            has_client_gc,
+            has_client_gc_selected,
+            is_focused: false,
         }
     }
 
@@ -259,6 +298,24 @@ impl WBar {
                 self.redraw_queue.push(Redraw::Tag(i));
             }
         }
+        println!("redraw queue after update: {:#?}", self.redraw_queue);
+    }
+
+    pub fn set_is_focused(&mut self, is_focused: bool) {
+        self.is_focused = is_focused;
+        // queue redrawing of the newly focused bar
+        // because we want to fill the focused tags client indicator
+        // rectangle
+        let idx = self.tags.iter().position(|t| t.selected).unwrap();
+        self.redraw_queue.push(Redraw::Tag(idx));
+    }
+
+    pub fn set_has_clients(&mut self, tag_idx: usize, has_clients: bool) {
+        let tag = &mut self.tags[tag_idx];
+        if tag.has_clients != has_clients {
+            self.redraw_queue.push(Redraw::Tag(tag_idx))
+        }
+        tag.has_clients = has_clients;
     }
 
     pub fn draw<C: Connection>(&mut self, conn: &C) {
@@ -278,6 +335,34 @@ impl WBar {
                     self.font_drawer
                         .draw(conn, tag.rect, &tag.text, self.picture, bg, fg)
                         .unwrap();
+
+                    let client_rect: Rectangle =
+                        Rect::new(tag.rect.x + 1, tag.rect.y + 1, 3, 3).into();
+                    let client_rect_fill: Rectangle =
+                        Rect::new(tag.rect.x + 1, tag.rect.y + 1, 4, 4).into();
+
+                    if !tag.has_clients {
+                        continue;
+                    }
+
+                    if tag.selected && self.is_focused {
+                        conn.poly_fill_rectangle(
+                            self.window,
+                            self.has_client_gc_selected,
+                            &[client_rect_fill],
+                        )
+                        .unwrap();
+                    } else if tag.selected && !self.is_focused {
+                        conn.poly_rectangle(
+                            self.window,
+                            self.has_client_gc_selected,
+                            &[client_rect],
+                        )
+                        .unwrap();
+                    } else if !tag.selected {
+                        conn.poly_rectangle(self.window, self.has_client_gc, &[client_rect])
+                            .unwrap();
+                    }
                 }
                 Redraw::LayoutSymbol => {
                     self.font_drawer

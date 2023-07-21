@@ -1055,7 +1055,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         win: Window,
         geom: &GetGeometryReply,
     ) -> Result<(), ReplyOrIdError> {
-        let is_floating = self.window_property_exists(
+        let mut is_floating = self.window_property_exists(
             win,
             self.atoms._NET_WM_WINDOW_TYPE_DIALOG,
             self.atoms._NET_WM_WINDOW_TYPE,
@@ -1069,37 +1069,34 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM,
         )?;
 
-        // WM_TRANSIENT_FOR Property
+        let transient_for = self
+            .conn
+            .get_property(
+                false,
+                win,
+                self.atoms.WM_TRANSIENT_FOR,
+                self.atoms.WINDOW,
+                0,
+                u32::MAX,
+            )?
+            .reply()?;
 
-        // The WM_TRANSIENT_FOR property (of type WINDOW) contains the ID of another top-level window.
-        // The implication is that this window is a pop-up on behalf of the named window, and window
-        // managers may decide not to decorate transient windows or may treat them differently in other ways.
-        // In particular, window managers should present newly mapped WM_TRANSIENT_FOR windows without
-        // requiring any user interaction, even if mapping top-level windows normally does require
-        // interaction. Dialogue boxes, for example, are an example of windows that should have
-        // WM_TRANSIENT_FOR set.
+        let mut ws_idx = self.focused_monitor.borrow().workspaces.index();
+        let mut mon_idx = self.monitors.index();
 
-        // It is important not to confuse WM_TRANSIENT_FOR with override-redirect. WM_TRANSIENT_FOR
-        // should be used in those cases where the pointer is not grabbed while the window is mapped
-        // (in other words, if other windows are allowed to be active while the transient is up).
-        // If other windows must be prevented from processing input (for example, when
-        // implementing pop-up menus), use override-redirect and grab the pointer while the window is mapped.
+        if let Some(trans) = transient_for.value32() {
+            if let Some(t) = trans.collect::<Vec<u32>>().get(0) {
+                if !is_floating {
+                    is_floating = true;
+                }
 
-        // let trans = self
-        //     .conn
-        //     .get_property(
-        //         false,
-        //         win,
-        //         self.atoms.WM_TRANSIENT_FOR,
-        //         self.atoms.ATOM,
-        //         0,
-        //         std::mem::size_of::<u32>() as u32,
-        //     )?
-        //     .reply()?;
-        // println!("trans: {trans:#?}");
-        // if let Some(val) = trans.value32() {
-        //     println!("trans: {:?}", val.into_iter().collect::<Vec<u32>>());
-        // }
+                if let Some(c) = self.win_to_client(*t) {
+                    let c = c.borrow();
+                    ws_idx = c.workspace;
+                    mon_idx = c.monitor;
+                }
+            }
+        }
 
         let mut conf_aux =
             ConfigureWindowAux::new().border_width(theme::window::BORDER_WIDTH as u32);
@@ -1140,21 +1137,22 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.configure_window(win, &conf_aux)?;
         self.conn.change_window_attributes(win, &change_aux)?;
 
-        let ws_idx = self.focused_monitor.borrow().workspaces.index();
-        let mon_idx = self.monitors.index();
-        self.focused_workspace
-            .borrow_mut()
-            .push_client(WClientState::new(
-                win,
-                Rect::new(x, y, geom.width, geom.height),
-                is_floating,
-                is_fullscreen,
-                ws_idx,
-                mon_idx,
-            ));
+        // this should never fail
+        let m = self.monitors.get(mon_idx).unwrap();
+        let mut mtemp = m.borrow_mut();
+        let ws = mtemp.workspaces.get(ws_idx).unwrap();
+
+        ws.borrow_mut().push_client(WClientState::new(
+            win,
+            Rect::new(x, y, geom.width, geom.height),
+            is_floating,
+            is_fullscreen,
+            ws_idx,
+            mon_idx,
+        ));
         self.set_client_state(win, WindowState::Normal)?;
 
-        self.recompute_layout(&self.focused_monitor)?;
+        self.recompute_layout(&m)?;
         self.conn.map_window(win)?;
         self.update_client_list()?;
 
@@ -1171,6 +1169,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.warp_pointer_to_focused_client()?;
 
         Ok(())
+    }
+
+    fn win_to_client(&self, win: Window) -> Option<Rc<RefCell<WClientState>>> {
+        for m in self.monitors.inner().iter() {
+            for ws in m.borrow().workspaces.inner().iter() {
+                let c = ws.borrow().find_client_by_win(win);
+                if c.is_some() {
+                    return c;
+                }
+            }
+        }
+        None
     }
 
     fn move_adjacent(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {

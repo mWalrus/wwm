@@ -37,6 +37,8 @@ atom_manager! {
         _NET_ACTIVE_WINDOW,
         _NET_SUPPORTING_WM_CHECK,
         _NET_WM_STATE,
+        _NET_WM_STATE_ADD,
+        _NET_WM_STATE_TOGGLE,
         _NET_WM_STATE_FULLSCREEN,
         _NET_WM_WINDOW_TYPE,
         _NET_WM_WINDOW_TYPE_DIALOG,

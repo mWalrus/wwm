@@ -9,6 +9,7 @@ use crate::{
 pub struct WClientState {
     pub window: Window,
     pub rect: Rect,
+    pub old_rect: Rect,
     pub is_floating: bool,
     pub is_fullscreen: bool,
     pub is_fixed: bool,
@@ -22,12 +23,15 @@ pub struct WClientState {
     pub mina: f32,
     pub workspace: usize,
     pub monitor: usize,
+    pub old_state: bool,
+    pub old_bw: u16,
 }
 
 impl WClientState {
     pub fn new(
         window: Window,
         rect: Rect,
+        old_rect: Rect,
         is_floating: bool,
         is_fullscreen: bool,
         workspace: usize,
@@ -36,6 +40,7 @@ impl WClientState {
         Self {
             window,
             rect,
+            old_rect,
             is_floating,
             is_fullscreen,
             is_fixed: false,
@@ -49,6 +54,8 @@ impl WClientState {
             mina: 0f32,
             workspace,
             monitor,
+            old_state: false,
+            old_bw: 0,
         }
     }
 

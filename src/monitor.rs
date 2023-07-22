@@ -9,7 +9,7 @@ use x11rb::{
 use crate::{
     client::WClientState,
     config::{theme, workspaces::WORKSPACE_CAP},
-    util::{Pos, StateError, WDirection, WVec},
+    util::{Pos, Rect, StateError, WDirection, WVec},
     workspace::WWorkspace,
 };
 
@@ -17,10 +17,7 @@ pub struct WMonitor<'a, C: Connection> {
     pub conn: &'a C,
     pub bar: WBar,
     pub primary: bool,
-    pub x: i16,
-    pub y: i16,
-    pub width: u16,
-    pub height: u16,
+    pub rect: Rect,
     pub workspaces: WVec<WWorkspace>,
 }
 
@@ -69,16 +66,13 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             conn,
             bar,
             primary: mi.primary,
-            x: mi.x,
-            y,
-            width: mi.width,
-            height,
+            rect: Rect::new(mi.x, y, mi.width, height),
             workspaces,
         }
     }
 
     pub fn client_height(&self, client_count: usize) -> u16 {
-        self.height / client_count as u16
+        self.rect.h / client_count as u16
     }
 
     pub fn focus_workspace_from_index(&mut self, idx: usize) -> Result<(), StateError> {
@@ -90,15 +84,15 @@ impl<'a, C: Connection> WMonitor<'a, C> {
     }
 
     pub fn has_pos(&self, p: Pos) -> bool {
-        let has_x = p.x >= self.x && p.x <= self.x + self.width as i16;
-        let has_y = p.y >= self.y && p.y <= self.y + self.height as i16;
+        let has_x = p.x >= self.rect.x && p.x <= self.rect.x + self.rect.w as i16;
+        let has_y = p.y >= self.rect.y && p.y <= self.rect.y + self.rect.h as i16;
         has_x && has_y
     }
 
     pub fn find_adjacent_monitor(&self, p: Pos) -> Option<WDirection> {
-        if p.x < self.x {
+        if p.x < self.rect.x {
             return Some(WDirection::Prev);
-        } else if p.x > self.x + self.width as i16 {
+        } else if p.x > self.rect.x + self.rect.w as i16 {
             return Some(WDirection::Next);
         }
         None
@@ -125,6 +119,6 @@ impl<'a, C: Connection> WMonitor<'a, C> {
     }
 
     pub fn width_from_percentage(&self, p: f32) -> u16 {
-        (self.width as f32 * p) as u16
+        (self.rect.w as f32 * p) as u16
     }
 }

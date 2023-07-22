@@ -15,6 +15,7 @@ pub enum WKeyCommand {
     MoveClientToWorkspace(usize),
     MoveClientToMonitor(WDirection),
     UnFloat,
+    Fullscreen,
 }
 
 #[derive(Debug, Clone, Copy)]

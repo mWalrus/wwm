@@ -538,17 +538,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 y = 0;
             }
         } else {
-            if x >= mon.x + mon.width as i16 {
-                x = mon.x + mon.width as i16 - c.width() as i16;
+            if x >= mon.rect.x + mon.rect.w as i16 {
+                x = mon.rect.x + mon.rect.w as i16 - c.width() as i16;
             }
-            if y >= mon.y + mon.height as i16 {
-                y = mon.y + mon.height as i16 - c.height() as i16;
+            if y >= mon.rect.y + mon.rect.h as i16 {
+                y = mon.rect.y + mon.rect.h as i16 - c.height() as i16;
             }
-            if (x + w as i16 + 2 * c.bw as i16) <= mon.x {
-                x = mon.x;
+            if (x + w as i16 + 2 * c.bw as i16) <= mon.rect.x {
+                x = mon.rect.x;
             }
-            if (y + h as i16 + 2 * c.bw as i16) <= mon.y {
-                y = mon.y;
+            if (y + h as i16 + 2 * c.bw as i16) <= mon.rect.y {
+                y = mon.rect.y;
             }
         }
         let bh = util::bar_height();
@@ -745,11 +745,30 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Event::MotionNotify(e) => self.handle_motion_notify(e)?,
             Event::KeyPress(e) => self.handle_key_press(e)?,
             Event::PropertyNotify(e) => self.handle_property_notify(e)?,
+            Event::ClientMessage(e) => self.handle_client_message(e)?,
             Event::Error(e) => eprintln!("ERROR: {e:#?}"),
             _ => {}
         }
 
         Ok(ShouldExit::No)
+    }
+
+    fn handle_client_message(&self, evt: ClientMessageEvent) -> Result<(), ReplyOrIdError> {
+        if evt.type_ == self.atoms._NET_WM_STATE {
+            let data = evt.data.as_data32();
+            if data[1] == self.atoms._NET_WM_STATE_FULLSCREEN
+                || data[2] == self.atoms._NET_WM_STATE_FULLSCREEN
+            {
+                if let Some(c) = self.win_to_client(evt.window) {
+                    let c = c.borrow_mut();
+                    let m = self.monitors.get(c.monitor).unwrap();
+                    let fullscreen = data[0] == self.atoms._NET_WM_STATE_ADD
+                        || (data[0] == self.atoms._NET_WM_STATE_TOGGLE && !c.is_fullscreen);
+                    self.fullscreen(c, &m, fullscreen)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn handle_expose(&mut self, evt: ExposeEvent) {
@@ -780,8 +799,59 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WKeyCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
             WKeyCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
             WKeyCommand::UnFloat => self.unfloat_focused_client()?,
+            WKeyCommand::Fullscreen => self.fullscreen_focused_client()?,
             WKeyCommand::Exit => self.try_exit(),
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn fullscreen_focused_client(&mut self) -> Result<(), ReplyOrIdError> {
+        if let Some(c) = &self.focused_client {
+            let c = c.borrow_mut();
+            let m = self.monitors.get(c.monitor).unwrap();
+            let fullscreen = !c.is_fullscreen;
+            self.fullscreen(c, &m, fullscreen)?;
+        }
+        Ok(())
+    }
+
+    fn fullscreen(
+        &self,
+        mut c: RefMut<'_, WClientState>,
+        m: &Rc<RefCell<WMonitor<C>>>,
+        fullscreen: bool,
+    ) -> Result<(), ReplyOrIdError> {
+        if fullscreen && !c.is_fullscreen {
+            self.conn.change_property32(
+                PropMode::REPLACE,
+                c.window,
+                self.atoms._NET_WM_STATE,
+                self.atoms.ATOM,
+                &[self.atoms._NET_WM_STATE_FULLSCREEN],
+            )?;
+            c.is_fullscreen = true;
+            c.old_state = c.is_floating;
+            c.old_bw = c.bw;
+            c.bw = 0;
+            c.is_floating = true;
+            let rect = m.borrow().rect;
+            let bh = util::bar_height();
+            self.resize_client(c, rect.x, rect.y - bh as i16, rect.w, rect.h + bh)?;
+        } else if !fullscreen && c.is_fullscreen {
+            self.conn.change_property32(
+                PropMode::REPLACE,
+                c.window,
+                self.atoms._NET_WM_STATE,
+                self.atoms.ATOM,
+                &[0],
+            )?;
+            c.is_fullscreen = false;
+            c.is_floating = c.old_state;
+            c.bw = c.old_bw;
+            let r = c.old_rect;
+            self.resize_client(c, r.x, r.y, r.w, r.h)?;
+            self.recompute_layout(&m)?;
         }
         Ok(())
     }
@@ -984,7 +1054,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 .x(x as i32)
                 .y(y as i32)
                 .width(w as u32)
-                .height(h as u32),
+                .height(h as u32)
+                .border_width(c.bw as u32),
         )?;
 
         let mut ce = ConfigureNotifyEvent::default();
@@ -995,7 +1066,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         ce.y = c.rect.y;
         ce.width = c.rect.w;
         ce.height = c.rect.h;
-        ce.border_width = BORDER_WIDTH;
+        ce.border_width = c.bw;
         ce.override_redirect = false;
         self.conn
             .send_event(false, c.window, EventMask::STRUCTURE_NOTIFY, ce)?;
@@ -1103,7 +1174,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         let (mx, my, mw, mh) = {
             let m = self.focused_monitor.borrow();
-            (m.x, m.y, m.width, m.height)
+            (m.rect.x, m.rect.y, m.rect.w, m.rect.h)
         };
 
         let mut x = geom.x;
@@ -1139,17 +1210,27 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         // this should never fail
         let m = self.monitors.get(mon_idx).unwrap();
-        let mut mtemp = m.borrow_mut();
-        let ws = mtemp.workspaces.get(ws_idx).unwrap();
+        let mb = m.borrow();
+        let ws = mb.workspaces.get(ws_idx).unwrap();
+
+        let rect = if is_fullscreen {
+            mb.rect
+        } else {
+            Rect::new(x, y, geom.width, geom.height)
+        };
+
+        drop(mb);
 
         ws.borrow_mut().push_client(WClientState::new(
             win,
-            Rect::new(x, y, geom.width, geom.height),
+            rect,
+            rect, // we use the same rect here for now
             is_floating,
             is_fullscreen,
             ws_idx,
             mon_idx,
         ));
+
         self.set_client_state(win, WindowState::Normal)?;
 
         self.recompute_layout(&m)?;
@@ -1158,6 +1239,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         self.unfocus()?;
         self.focus()?;
+
+        if is_fullscreen {
+            self.fullscreen_focused_client()?;
+        }
 
         {
             let mut m = self.focused_monitor.borrow_mut();
@@ -1427,8 +1512,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             0,
             0,
             0,
-            m.x + (m.width as i16 / 2),
-            m.y + (m.height as i16 / 2),
+            m.rect.x + (m.rect.w as i16 / 2),
+            m.rect.y + (m.rect.h as i16 / 2),
         )?;
         Ok(())
     }

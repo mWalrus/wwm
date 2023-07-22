@@ -88,6 +88,7 @@ pub mod commands {
             WKeybind::new(MOD,         ks::KEY_h,      WKeyCommand::FocusMonitor(WDirection::Prev)),
             WKeybind::new(MOD,         ks::KEY_l,      WKeyCommand::FocusMonitor(WDirection::Next)),
             WKeybind::new(MOD | SHIFT, ks::KEY_space,  WKeyCommand::UnFloat),
+            WKeybind::new(MOD,         ks::KEY_F11,    WKeyCommand::Fullscreen),
             WKeybind::new(MOD,         ks::KEY_q,      WKeyCommand::Exit),
             // BEGIN: workspace keybinds
             WKeybind::new(MOD,         ks::KEY_1,      WKeyCommand::SelectWorkspace(0)),

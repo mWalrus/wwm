@@ -32,17 +32,6 @@ impl From<&GetGeometryReply> for Rect {
     }
 }
 
-impl<C: Connection> From<&WMonitor<'_, C>> for Rect {
-    fn from(m: &WMonitor<C>) -> Self {
-        Self {
-            x: m.x,
-            y: m.y,
-            w: m.width,
-            h: m.height,
-        }
-    }
-}
-
 impl From<Rect> for ConfigureWindowAux {
     fn from(cr: Rect) -> Self {
         ConfigureWindowAux::new()
@@ -174,10 +163,6 @@ impl<T> WVec<T> {
         &self.inner
     }
 
-    pub fn inner_mut(&mut self) -> &mut Vec<Rc<RefCell<T>>> {
-        &mut self.inner
-    }
-
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -301,7 +286,7 @@ impl<T> WVec<T> {
         Some(self.inner[index].borrow_mut())
     }
 
-    pub fn get(&mut self, index: usize) -> Option<Rc<RefCell<T>>> {
+    pub fn get(&self, index: usize) -> Option<Rc<RefCell<T>>> {
         if index >= self.inner.len() {
             return None;
         }

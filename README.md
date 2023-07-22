@@ -30,7 +30,7 @@ __Column layout__:
 - [ ] Bar
   - [x] Workspace tags
     - [x] Focus indication
-    - [ ] "Contains-clients" indication
+    - [x] "Contains-clients" indication
     - [x] Click to change focus
   - [x] Current layout indicator
   - [x] Current focused window title
@@ -46,7 +46,7 @@ __Column layout__:
 - [x] Move clients with mouse
 - [x] Resize clients with mouse
 - [x] Unfloat floating clients
-- [ ] Fullscreening
+- [x] Fullscreening
 
 
 ## Configuration

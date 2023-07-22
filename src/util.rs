@@ -3,11 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
-    client::WClientState,
-    config::{self, theme::window::BORDER_WIDTH},
-    monitor::WMonitor,
-};
+use crate::{client::WClientState, config, monitor::WMonitor};
 
 pub type ClientCell = Rc<RefCell<WClientState>>;
 
@@ -362,8 +358,4 @@ pub fn cmd_bits(cmd: &'static [&'static str]) -> Option<(&'static str, &'static 
 
 pub const fn bar_height() -> u16 {
     config::theme::bar::FONT_SIZE as u16 + (config::theme::bar::PADDING * 2)
-}
-
-pub fn client_size(c: RefMut<'_, WClientState>) -> (u16, u16) {
-    (c.rect.w + (c.bw * 2), c.rect.h + (c.bw * 2))
 }

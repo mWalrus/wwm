@@ -6,6 +6,7 @@ use x11rb::{
     resource_manager::new_from_default,
 };
 
+#[derive(Debug)]
 pub struct WCursors {
     pub normal: u32,
     pub resize: u32,

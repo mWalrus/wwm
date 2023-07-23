@@ -1,16 +1,23 @@
-use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use wwm_bar::{font::FontDrawer, visual::RenderVisualInfo, WBar};
 use x11rb::{
     connection::Connection,
-    protocol::{randr::MonitorInfo, xproto::Rectangle},
+    protocol::{
+        randr::MonitorInfo,
+        xproto::{ConfigureWindowAux, ConnectionExt, Rectangle},
+    },
+    xcb_ffi::ReplyOrIdError,
 };
 
 use crate::{
     client::WClientState,
-    config::{theme, workspaces::WORKSPACE_CAP},
-    util::{Pos, Rect, StateError, WDirection, WVec},
-    workspace::WWorkspace,
+    config::{
+        theme,
+        workspaces::{MAIN_CLIENT_WIDTH_PERCENTAGE, WORKSPACE_TAG_CAP},
+    },
+    layouts::WLayout,
+    util::{Pos, Rect, StateError, WDirection},
 };
 
 pub struct WMonitor<'a, C: Connection> {
@@ -18,7 +25,11 @@ pub struct WMonitor<'a, C: Connection> {
     pub bar: WBar,
     pub primary: bool,
     pub rect: Rect,
-    pub workspaces: WVec<WWorkspace>,
+    pub clients: Vec<WClientState>,
+    pub client: Option<usize>,
+    pub layout: WLayout,
+    pub tag: usize,
+    pub width_factor: f32,
 }
 
 impl<'a, C: Connection> WMonitor<'a, C> {
@@ -28,12 +39,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         font_drawer: Rc<FontDrawer>,
         vis_info: Rc<RenderVisualInfo>,
     ) -> Self {
-        let mut workspaces = Vec::with_capacity(WORKSPACE_CAP);
-        for _ in 0..WORKSPACE_CAP {
-            workspaces.push(WWorkspace::new());
-        }
-        let workspaces = WVec::new(workspaces, 0);
-        let layout_symbol = workspaces.selected().unwrap().borrow().layout.to_string();
+        let layout = WLayout::MainStack;
 
         let bar_rect = Rectangle {
             x: mi.x,
@@ -51,8 +57,8 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             bar_rect,
             theme::bar::PADDING,
             theme::bar::SECTION_PADDING,
-            WORKSPACE_CAP,
-            layout_symbol,
+            WORKSPACE_TAG_CAP,
+            layout.to_string(),
             "",
             [
                 theme::bar::FG,
@@ -67,20 +73,12 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             bar,
             primary: mi.primary,
             rect: Rect::new(mi.x, y, mi.width, height),
-            workspaces,
+            clients: Vec::new(),
+            client: None,
+            layout,
+            tag: 0,
+            width_factor: MAIN_CLIENT_WIDTH_PERCENTAGE,
         }
-    }
-
-    pub fn client_height(&self, client_count: usize) -> u16 {
-        self.rect.h / client_count as u16
-    }
-
-    pub fn focus_workspace_from_index(&mut self, idx: usize) -> Result<(), StateError> {
-        self.workspaces.select(idx)
-    }
-
-    pub fn focused_workspace(&self) -> Rc<RefCell<WWorkspace>> {
-        self.workspaces.selected().unwrap()
     }
 
     pub fn has_pos(&self, p: Pos) -> bool {
@@ -98,24 +96,184 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         None
     }
 
-    pub fn is_focused_workspace(&self, idx: usize) -> bool {
-        self.workspaces.index() == idx
-    }
-
-    pub fn next_workspace(&mut self, dir: WDirection) -> Rc<RefCell<WWorkspace>> {
-        match dir {
-            WDirection::Prev => self.workspaces.prev_index(true, true).unwrap(),
-            WDirection::Next => self.workspaces.next_index(true, true).unwrap(),
-        };
-        self.focused_workspace()
-    }
-
-    pub fn add_client_to_workspace(&mut self, ws_idx: usize, client: WClientState) {
-        if let Some(mut ws) = self.workspaces.get_mut(ws_idx) {
-            let ws = ws.borrow_mut();
-            ws.push_client(client);
-            ws.hide_clients(self.conn).unwrap();
+    pub fn set_tag(&mut self, new_tag: usize) -> Result<(), StateError> {
+        if new_tag > WORKSPACE_TAG_CAP - 1 {
+            return Err(StateError::Bounds(new_tag));
         }
+        let clients = self.clients_in_tag(new_tag);
+        if clients.is_empty() {
+            self.client = None;
+        } else if let Some(i) = clients.last() {
+            self.client = Some(*i);
+        }
+        self.tag = new_tag;
+        Ok(())
+    }
+
+    pub fn selected_client(&self) -> Option<&WClientState> {
+        if let Some(i) = self.client {
+            return Some(&self.clients[i]);
+        }
+        None
+    }
+
+    pub fn selected_client_mut(&mut self) -> Option<&mut WClientState> {
+        if let Some(i) = self.client {
+            return Some(&mut self.clients[i]);
+        }
+        None
+    }
+
+    pub fn select_adjacent(&mut self, dir: WDirection) {
+        if let Some(i) = self.client {
+            match dir {
+                WDirection::Prev => {
+                    if let Some(i) = self.clients[i].prev {
+                        self.client = Some(i);
+                    }
+                }
+                WDirection::Next => {
+                    if let Some(i) = self.clients[i].next {
+                        self.client = Some(i);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn hide_clients(&self, conn: &C, tag: usize) -> Result<(), ReplyOrIdError> {
+        let clients = self.clients_in_tag(tag);
+        for i in clients.iter() {
+            let c = self.clients[*i];
+            let aux = ConfigureWindowAux::new().x(c.rect.w as i32 * -2);
+            conn.configure_window(c.window, &aux)?;
+        }
+        conn.flush()?;
+        Ok(())
+    }
+
+    pub fn set_layout(&mut self, layout: WLayout) -> bool {
+        if self.layout == layout {
+            return false;
+        }
+        self.layout = layout;
+        true
+    }
+
+    pub fn clients_in_tag(&self, tag: usize) -> Vec<usize> {
+        (0..self.clients.len())
+            .into_iter()
+            .filter(|i| self.clients[*i].tag == tag)
+            .collect()
+    }
+
+    pub fn swap_clients(&mut self, dir: WDirection) {
+        if let Some(ci) = self.client {
+            let adj_idx = match dir {
+                WDirection::Prev => {
+                    let curr = &mut self.clients[ci];
+                    // early return since we have nothing to update
+                    if curr.prev.is_none() {
+                        return;
+                    }
+                    curr.prev
+                }
+                WDirection::Next => {
+                    let curr = &mut self.clients[ci];
+                    // early return since we have nothing to update
+                    if curr.next.is_none() {
+                        return;
+                    }
+                    curr.next
+                }
+            };
+
+            let adj_idx = adj_idx.unwrap();
+
+            let cnext = self.clients[ci].next;
+            let cprev = self.clients[ci].prev;
+
+            self.clients[ci].prev = self.clients[adj_idx].prev;
+            self.clients[ci].next = self.clients[adj_idx].next;
+
+            self.clients[adj_idx].prev = cprev;
+            self.clients[adj_idx].next = cnext;
+
+            self.clients.swap(adj_idx, ci);
+            self.client = Some(adj_idx);
+        }
+    }
+
+    pub fn client_to_tag(&mut self, conn: &C, tag: usize) -> Result<(), ReplyOrIdError> {
+        if let Some(curr_idx) = self.client {
+            let clients_in_current_tag = self.clients_in_tag(self.tag);
+            let (cp, cn) = {
+                let curr = &self.clients[curr_idx];
+                (curr.prev, curr.next)
+            };
+            for i in clients_in_current_tag.iter() {
+                let c = &mut self.clients[*i];
+                if c.next == Some(curr_idx) {
+                    c.next = cn;
+                }
+                if c.prev == Some(curr_idx) {
+                    c.prev = cp;
+                }
+            }
+            let clients_in_other_tag = self.clients_in_tag(tag);
+
+            if !clients_in_other_tag.is_empty() {
+                if let Some(last_idx) = clients_in_other_tag.last() {
+                    self.clients[*last_idx].next = Some(clients_in_other_tag.len());
+                    self.clients[curr_idx].prev = Some(*last_idx);
+                }
+                if let Some(first_idx) = clients_in_other_tag.first() {
+                    let c = &mut self.clients[*first_idx];
+                    c.prev = Some(clients_in_other_tag.len());
+                }
+            }
+            self.clients[curr_idx].tag = tag;
+            self.hide_clients(conn, tag)?;
+        }
+        Ok(())
+    }
+
+    pub fn push_client(&mut self, mut client: WClientState) {
+        let clients = self.clients_in_tag(self.tag);
+
+        if !clients.is_empty() {
+            if let Some(i) = clients.last() {
+                self.clients[*i].next = Some(self.clients.len());
+                client.prev = Some(*i);
+            }
+
+            if let Some(i) = clients.first() {
+                self.clients[*i].prev = Some(self.clients.len());
+                client.next = Some(*i);
+            }
+        }
+
+        self.clients.push(client);
+        self.bar.set_has_clients(self.tag, true);
+        self.client = Some(self.clients.len() - 1);
+    }
+
+    pub fn remove_client(&mut self, idx: usize) -> WClientState {
+        let c = self.clients.remove(idx);
+        let clients = self.clients_in_tag(self.tag);
+        if clients.is_empty() {
+            self.client = None;
+        } else {
+            if let Some(next) = c.next {
+                if next == *clients.first().unwrap() {
+                    self.client = c.prev;
+                } else {
+                    self.client = Some(*clients.last().unwrap());
+                }
+            }
+        }
+        self.bar.set_has_clients(self.tag, !clients.is_empty());
+        c
     }
 
     pub fn width_from_percentage(&self, p: f32) -> u16 {

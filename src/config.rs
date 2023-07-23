@@ -26,7 +26,8 @@ pub mod theme {
 }
 
 pub mod workspaces {
-    pub const WORKSPACE_CAP: usize = 9;
+    // amount of workspace tags per monitor
+    pub const WORKSPACE_TAG_CAP: usize = 9;
     // how much of the monitor width the main client occupies in the main-stack layout
     pub const MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
     // how much the main client's width is adjusted when resizing with keybinds

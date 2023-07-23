@@ -5,7 +5,7 @@ use x11rb::connection::Connection;
 use crate::{
     config::theme::window::BORDER_WIDTH,
     monitor::WMonitor,
-    util::{bar_height, ClientCell, Rect},
+    util::{bar_height, Rect},
 };
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
@@ -31,9 +31,9 @@ pub fn layout_clients<C: Connection>(
     layout: &WLayout,
     width_factor: f32,
     monitor: &WMonitor<C>,
-    clients: &Vec<&ClientCell>,
+    clients: usize,
 ) -> Option<Vec<Rect>> {
-    if clients.is_empty() {
+    if clients == 0 {
         return None;
     }
 
@@ -46,12 +46,8 @@ pub fn layout_clients<C: Connection>(
     Some(rects)
 }
 
-fn tile<C: Connection>(
-    mon: &WMonitor<C>,
-    width_factor: f32,
-    clients: &Vec<&ClientCell>,
-) -> Vec<Rect> {
-    if clients.len() == 1 {
+fn tile<C: Connection>(mon: &WMonitor<C>, width_factor: f32, clients: usize) -> Vec<Rect> {
+    if clients == 1 {
         return single_client(mon);
     }
 
@@ -66,10 +62,10 @@ fn tile<C: Connection>(
         mon.rect.h - BORDER_WIDTH * 2,
     ));
 
-    let non_main_window_count = clients.len() - 1;
+    let non_main_window_count = clients - 1;
     let non_main_height = mon.rect.h / non_main_window_count as u16;
 
-    for (i, _) in clients.iter().skip(1).enumerate() {
+    for (i, _) in (0..clients).skip(1).enumerate() {
         let cy = mon.rect.y + (i as u16 * non_main_height) as i16;
         let mut ch = non_main_height;
 
@@ -95,13 +91,13 @@ fn tile<C: Connection>(
     rects
 }
 
-fn col<C: Connection>(mon: &WMonitor<C>, clients: &Vec<&ClientCell>) -> Vec<Rect> {
-    if clients.len() == 1 {
+fn col<C: Connection>(mon: &WMonitor<C>, clients: usize) -> Vec<Rect> {
+    if clients == 1 {
         return single_client(mon);
     }
     let mut rects = vec![];
-    let client_width = mon.rect.w / clients.len() as u16;
-    for i in 0..clients.len() {
+    let client_width = mon.rect.w / clients as u16;
+    for i in 0..clients {
         rects.push(Rect::new(
             mon.rect.x + (i as i16 * client_width as i16),
             mon.rect.y,

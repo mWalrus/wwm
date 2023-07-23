@@ -21,10 +21,12 @@ pub struct WClientState {
     pub inc_size: Size,
     pub maxa: f32,
     pub mina: f32,
-    pub workspace: usize,
+    pub tag: usize,
     pub monitor: usize,
     pub old_state: bool,
     pub old_bw: u16,
+    pub prev: Option<usize>,
+    pub next: Option<usize>,
 }
 
 impl WClientState {
@@ -52,10 +54,12 @@ impl WClientState {
             inc_size: Size::default(),
             maxa: 0f32,
             mina: 0f32,
-            workspace,
+            tag: workspace,
             monitor,
             old_state: false,
             old_bw: 0,
+            prev: None,
+            next: None,
         }
     }
 

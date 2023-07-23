@@ -11,12 +11,10 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, ClientCell, Pos, Rect, Size, WDirection, WVec},
-    workspace::WWorkspace,
+    util::{self, Pos, Rect, Size, WDirection},
     AtomCollection,
 };
 use std::{
-    cell::{Ref, RefCell, RefMut},
     collections::HashSet,
     process::{exit, Command},
     rc::Rc,
@@ -67,10 +65,8 @@ pub struct WinMan<'a, C: Connection> {
     screen: &'a Screen,
     #[allow(dead_code)]
     font_drawer: Rc<FontDrawer>,
-    monitors: WVec<WMonitor<'a, C>>,
-    focused_monitor: Rc<RefCell<WMonitor<'a, C>>>,
-    focused_workspace: Rc<RefCell<WWorkspace>>,
-    focused_client: Option<Rc<RefCell<WClientState>>>,
+    monitors: Vec<WMonitor<'a, C>>,
+    selmon: usize,
     pending_exposure: HashSet<Window>,
     drag_window: Option<(Pos, Pos, u32)>,
     resize_window: Option<u32>,
@@ -94,13 +90,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
         keyboard: WKeyboard,
         mouse: WMouse,
         atoms: AtomCollection,
-    ) -> Self {
+    ) -> Result<Self, ReplyOrIdError> {
         // TODO: error handling
         let screen = &conn.setup().roots[screen_num];
 
-        conn.flush().unwrap();
+        conn.flush()?;
 
-        Self::become_wm(conn, screen, mouse.cursors.normal).unwrap();
+        Self::become_wm(conn, screen, mouse.cursors.normal)?;
         Self::run_auto_start_commands().unwrap();
 
         let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
@@ -113,28 +109,18 @@ impl<'a, C: Connection> WinMan<'a, C> {
         .unwrap();
         let font_drawer = Rc::new(FontDrawer::new(font));
 
-        let mut monitors: WVec<WMonitor<'a, C>> =
-            Self::get_monitors(conn, screen, &font_drawer, &vis_info)
-                .unwrap()
-                .into();
+        let mut monitors: Vec<WMonitor<'a, C>> =
+            Self::get_monitors(conn, screen, &font_drawer, &vis_info)?.into();
 
-        monitors.find_and_select(|m| m.borrow().primary);
-        let focused_monitor = monitors.selected().unwrap();
-        focused_monitor.borrow_mut().bar.set_is_focused(true);
-
-        let focused_workspace = {
-            let mon = focused_monitor.borrow();
-            mon.workspaces.selected().unwrap()
-        };
+        let selmon = monitors.iter().position(|m| m.primary).unwrap_or(0);
+        monitors[selmon].bar.set_is_focused(true);
 
         let mut wwm = Self {
             conn,
             screen,
             font_drawer,
             monitors,
-            focused_monitor,
-            focused_workspace,
-            focused_client: None, // we havent scanned windows yet so it's always None here
+            selmon,
             pending_exposure: Default::default(),
             drag_window: None,
             resize_window: None,
@@ -144,11 +130,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
             ignore_enter: false,
             should_exit: Arc::new(AtomicBool::new(false)),
         };
-        wwm.warp_pointer_to_focused_monitor().unwrap();
+        wwm.warp_pointer_to_focused_monitor()?;
 
         // take care of potentially unmanaged windows
-        wwm.scan_windows().unwrap();
-        wwm
+        wwm.scan_windows()?;
+        Ok(wwm)
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -161,8 +147,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     break 'eventloop;
                 }
 
-                for m in self.monitors.inner().iter() {
-                    m.borrow_mut().bar.draw(self.conn);
+                for m in self.monitors.iter_mut() {
+                    m.bar.draw(self.conn);
                 }
                 self.conn.flush()?;
             }
@@ -199,92 +185,54 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn destroy_window(&mut self) -> Result<(), ReplyOrIdError> {
-        if self.focused_client.is_none() {
+        let c = if let Some(cidx) = self.monitors[self.selmon].client {
+            self.monitors[self.selmon].clients[cidx]
+        } else {
             return Ok(());
-        }
-
-        let c = self.focused_client.as_mut().unwrap();
-        let (win, ws, mon) = {
-            let c = c.borrow();
-            (c.window, c.workspace, c.monitor)
         };
-        self.detach(win, ws, mon)?;
+
+        self.detach(c.window, self.selmon)?;
 
         let delete_exists = self.window_property_exists(
-            win,
+            c.window,
             self.atoms.WM_DELETE_WINDOW,
             self.atoms.WM_PROTOCOLS,
             self.atoms.ATOM,
         )?;
 
         if delete_exists {
-            self.send_event(win, self.atoms.WM_DELETE_WINDOW)?;
+            self.send_event(c.window, self.atoms.WM_DELETE_WINDOW)?;
         } else {
             self.conn.grab_server()?;
             self.conn.set_close_down_mode(CloseDown::DESTROY_ALL)?;
-            self.conn.kill_client(win)?;
+            self.conn.kill_client(c.window)?;
             self.conn.sync()?;
             self.conn.ungrab_server()?;
         }
-        self.recompute_layout(&self.monitors.get(mon).unwrap())?;
+        self.recompute_layout(self.selmon)?;
+        self.focus()?;
+        self.warp_pointer_to_focused_client()?;
 
         self.ignore_enter = true;
         Ok(())
     }
 
-    fn detach(
-        &mut self,
-        win: Window,
-        workspace: usize,
-        monitor: usize,
-    ) -> Result<(), ReplyOrIdError> {
+    fn detach(&mut self, win: Window, monitor: usize) -> Result<(), ReplyOrIdError> {
         self.conn.grab_server()?;
-        println!("DEBUG: changing save set to delete");
         self.conn.change_save_set(SetMode::DELETE, win)?;
-        println!("DEBUG: changed!");
         self.conn.ungrab_server()?;
 
-        let m = self.monitors.get(monitor).unwrap();
-        let mut m = m.borrow_mut();
+        let m = &mut self.monitors[monitor];
 
-        let ws = m.workspaces.get(workspace).unwrap();
-        let mut ws = ws.borrow_mut();
-
-        ws.clients.retain(|client| client.borrow().window != win);
-        if ws.clients.is_empty() {
-            m.bar.set_has_clients(workspace, false);
+        let remove_idx = m.clients.iter().position(|c| c.window == win);
+        if let Some(i) = remove_idx {
+            m.remove_client(i);
         }
 
-        if let Some(client) = &self.focused_client {
-            if client.borrow().window == win {
-                self.focused_client = None;
-            }
-        }
         Ok(())
     }
 
-    fn entered_adjacent_monitor(&mut self, win: Window) {
-        self.monitors.find_and_select(|m| {
-            let mut m = m.borrow_mut();
-            let idx = m.workspaces.position(|ws| ws.borrow().has_client(win));
-            if idx.is_none() {
-                return false;
-            }
-
-            m.workspaces.select(idx.unwrap()).unwrap();
-
-            let ws = m.workspaces.selected().unwrap();
-            ws.borrow_mut().clients.find_and_select(|c| {
-                let c = c.borrow();
-                c.window == win
-            });
-            true
-        });
-        self.focused_monitor = self.monitors.selected().unwrap();
-        self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
-    }
-
-    fn get_window_title(&self, window: Window) -> Result<String, ReplyOrIdError> {
+    fn get_window_title(&mut self, window: Window) -> Result<String, ReplyOrIdError> {
         if let Ok(reply) = self.conn.get_property(
             false,
             window,
@@ -304,22 +252,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn focus(&mut self) -> Result<(), ReplyOrIdError> {
-        let ws = self.focused_workspace.borrow();
-        self.focused_client = ws.focused_client();
-
-        let win = {
-            if let Some(client) = &self.focused_client {
-                let c = client.borrow();
-                let name = self.get_window_title(c.window)?;
-                self.focused_monitor
-                    .borrow_mut()
-                    .bar
-                    .update_title(self.conn, name);
-                c.window
+        let (win, mon) = {
+            let m = &self.monitors[self.selmon];
+            if let Some(c) = m.selected_client() {
+                (c.window, c.monitor)
             } else {
                 return Ok(());
             }
         };
+
+        let name = self.get_window_title(win)?;
+        self.monitors[mon].bar.update_title(self.conn, name);
 
         self.conn
             .set_input_focus(InputFocus::POINTER_ROOT, win, CURRENT_TIME)?;
@@ -343,60 +286,54 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn focus_adjacent(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
-        self.unfocus()?;
-        {
-            self.focused_workspace.borrow_mut().focus_neighbor(dir);
-        }
+        self.unfocus(self.selmon)?;
+        let m = &mut self.monitors[self.selmon];
+        m.select_adjacent(dir);
         self.focus()?;
         self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
     fn focus_adjacent_monitor(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
-        self.unfocus()?;
+        self.unfocus(self.selmon)?;
 
-        match dir {
-            WDirection::Prev => self.monitors.prev_index(true, true),
-            WDirection::Next => self.monitors.next_index(true, true),
+        let selmon = match dir {
+            WDirection::Prev if self.selmon == 0 => self.monitors.len() - 1,
+            WDirection::Prev => self.selmon - 1,
+            WDirection::Next if self.selmon == self.monitors.len() - 1 => 0,
+            WDirection::Next => self.selmon + 1,
         };
 
-        let mon = self.monitors.selected().unwrap();
-
-        self.focused_workspace = mon.borrow().focused_workspace();
-        self.focused_client = self.focused_workspace.borrow().focused_client();
-
         // swap bar focus
-        self.focused_monitor.borrow_mut().bar.set_is_focused(false);
-        mon.borrow_mut().bar.set_is_focused(true);
-
-        self.focused_monitor = mon;
-
-        self.warp_pointer_to_focused_monitor().unwrap();
+        self.monitors[self.selmon].bar.set_is_focused(false);
+        self.monitors[selmon].bar.set_is_focused(true);
+        self.selmon = selmon;
 
         self.focus()?;
 
-        self.warp_pointer_to_focused_client().unwrap();
+        self.warp_pointer_to_focused_monitor()?;
+        self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
     fn focus_at_pointer(&mut self, evt: &MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
-        self.monitors
-            .find_and_select(|m| m.borrow().has_pos(Pos::from(evt)));
-        self.unfocus()?;
-        self.focused_monitor = self.monitors.selected().unwrap();
-        self.focused_workspace = self.focused_monitor.borrow().focused_workspace();
-        self.focus()?;
+        for (i, m) in self.monitors.iter_mut().enumerate() {
+            if m.has_pos(Pos::from(evt)) && i != self.selmon {
+                self.unfocus(self.selmon)?;
+                self.selmon = i;
+                self.focus()?;
+                break;
+            }
+        }
         Ok(())
     }
 
-    fn for_all_clients<F: Fn(&ClientCell) -> bool>(&self, cb: F) -> bool {
+    fn for_all_clients<F: Fn(&WClientState) -> bool>(&self, cb: F) -> bool {
         let mut success = false;
-        for mon in self.monitors.inner().iter() {
-            for ws in mon.borrow().workspaces.inner().iter() {
-                for c in ws.borrow().clients.inner().iter() {
-                    if cb(c) {
-                        success = true;
-                    }
+        for mon in self.monitors.iter() {
+            for c in mon.clients.iter() {
+                if cb(c) {
+                    success = true;
                 }
             }
         }
@@ -419,17 +356,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_button_press(&mut self, evt: ButtonPressEvent) -> Result<(), ReplyOrIdError> {
-        println!("got button press: {evt:#?}");
-        if self
-            .focused_monitor
-            .borrow()
-            .bar
-            .has_pointer(evt.root_x, evt.root_y)
-        {
-            let mut mon = self.focused_monitor.borrow_mut();
-            if let Some(idx) = mon.bar.select_tag_at_pos(evt.event_x, evt.event_y) {
-                drop(mon);
-                self.select_workspace(idx, false)?;
+        let m = &mut self.monitors[self.selmon];
+        if m.bar.has_pointer(evt.root_x, evt.root_y) {
+            if let Some(idx) = m.bar.select_tag_at_pos(evt.event_x, evt.event_y) {
+                self.select_tag(idx, false)?;
             }
             return Ok(());
         }
@@ -454,8 +384,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         evt: ButtonPressEvent,
         action: WMouseCommand,
     ) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = &self.focused_client {
-            let mut c = c.borrow_mut();
+        let m = &mut self.monitors[self.selmon];
+        if let Some(c) = m.selected_client_mut() {
             // is outside
             if evt.root_x > c.rect.x.max(c.rect.x + c.rect.w as i16) {
                 return Ok(());
@@ -499,22 +429,24 @@ impl<'a, C: Connection> WinMan<'a, C> {
             )?;
 
             c.is_floating = true;
-            drop(c);
-            self.recompute_layout(&self.focused_monitor).unwrap();
+            self.recompute_layout(self.selmon).unwrap();
         }
         Ok(())
     }
 
     fn apply_size_hints(
-        &self,
-        c: &RefMut<'_, WClientState>,
+        &mut self,
+        c_idx: usize,
+        mon_idx: usize,
         mut x: i16,
         mut y: i16,
         mut w: u16,
         mut h: u16,
         interact: bool,
     ) -> bool {
-        let mon = self.focused_monitor.borrow();
+        let mut m = &self.monitors[mon_idx];
+        let mut c = &m.clients[c_idx];
+        let mon_rect = m.rect;
 
         w = w.min(1);
         h = h.min(1);
@@ -538,17 +470,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 y = 0;
             }
         } else {
-            if x >= mon.rect.x + mon.rect.w as i16 {
-                x = mon.rect.x + mon.rect.w as i16 - c.width() as i16;
+            if x >= mon_rect.x + mon_rect.w as i16 {
+                x = mon_rect.x + mon_rect.w as i16 - c.width() as i16;
             }
-            if y >= mon.rect.y + mon.rect.h as i16 {
-                y = mon.rect.y + mon.rect.h as i16 - c.height() as i16;
+            if y >= mon_rect.y + mon_rect.h as i16 {
+                y = mon_rect.y + mon_rect.h as i16 - c.height() as i16;
             }
-            if (x + w as i16 + 2 * c.bw as i16) <= mon.rect.x {
-                x = mon.rect.x;
+            if (x + w as i16 + 2 * c.bw as i16) <= mon_rect.x {
+                x = mon_rect.x;
             }
-            if (y + h as i16 + 2 * c.bw as i16) <= mon.rect.y {
-                y = mon.rect.y;
+            if (y + h as i16 + 2 * c.bw as i16) <= mon_rect.y {
+                y = mon_rect.y;
             }
         }
         let bh = util::bar_height();
@@ -562,6 +494,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             if !c.hints_valid {
                 // FIXME: error handling
                 self.update_size_hints().unwrap();
+                m = &self.monitors[self.selmon];
+                c = &m.clients[c_idx];
             }
 
             // ICCCM 4.1.2.3
@@ -605,9 +539,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         x != c.rect.x || y != c.rect.y || w != c.rect.w || h != c.rect.h
     }
 
-    fn update_size_hints(&self) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = &self.focused_client {
-            let mut c = c.borrow_mut();
+    fn update_size_hints(&mut self) -> Result<(), ReplyOrIdError> {
+        if let Some(c) = self.monitors[self.selmon].selected_client_mut() {
             let wm_size_hints = WmSizeHints::get_normal_hints(self.conn, c.window)?.reply()?;
 
             if let Some(bs) = wm_size_hints.base_size {
@@ -678,12 +611,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_enter(&mut self, evt: EnterNotifyEvent) -> Result<(), ReplyOrIdError> {
-        if self.resize_window.is_some() || self.drag_window.is_some() {
+        if self.ignore_enter {
+            self.ignore_enter = false;
             return Ok(());
         }
 
-        if self.ignore_enter {
-            self.ignore_enter = false;
+        if self.resize_window.is_some() || self.drag_window.is_some() {
             return Ok(());
         }
 
@@ -697,38 +630,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        let was_managed = self.for_all_clients(|c| {
-            let c = c.borrow();
-            c.window == entered_win
-        });
-
-        if !was_managed {
-            return Ok(());
+        if let Some((mon, _, i)) = self.win_to_client(entered_win) {
+            self.unfocus(self.selmon)?;
+            self.monitors[mon].client = Some(i);
+            self.focus()?;
         }
 
-        if let Some(client) = &self.focused_client {
-            let c = client.borrow();
-            if c.window == entered_win {
-                return Ok(());
-            }
-        }
-
-        self.unfocus()?;
-
-        {
-            let in_workspace = self.focused_workspace.borrow().has_client(entered_win);
-            if !in_workspace {
-                self.entered_adjacent_monitor(entered_win);
-            }
-
-            let mut ws = self.focused_workspace.borrow_mut();
-            ws.clients.find_and_select(|c| {
-                let c = c.borrow();
-                c.window == entered_win
-            });
-        }
-
-        self.focus()?;
         Ok(())
     }
 
@@ -753,18 +660,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(ShouldExit::No)
     }
 
-    fn handle_client_message(&self, evt: ClientMessageEvent) -> Result<(), ReplyOrIdError> {
+    fn handle_client_message(&mut self, evt: ClientMessageEvent) -> Result<(), ReplyOrIdError> {
         if evt.type_ == self.atoms._NET_WM_STATE {
             let data = evt.data.as_data32();
             if data[1] == self.atoms._NET_WM_STATE_FULLSCREEN
                 || data[2] == self.atoms._NET_WM_STATE_FULLSCREEN
             {
-                if let Some(c) = self.win_to_client(evt.window) {
-                    let c = c.borrow_mut();
-                    let m = self.monitors.get(c.monitor).unwrap();
+                if let Some((mon, is_fullscreen, _)) = self.win_to_client(evt.window) {
                     let fullscreen = data[0] == self.atoms._NET_WM_STATE_ADD
-                        || (data[0] == self.atoms._NET_WM_STATE_TOGGLE && !c.is_fullscreen);
-                    self.fullscreen(c, &m, fullscreen)?;
+                        || (data[0] == self.atoms._NET_WM_STATE_TOGGLE && !is_fullscreen);
+                    self.fullscreen(mon, fullscreen)?;
                 }
             }
         }
@@ -794,9 +699,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
             WKeyCommand::Spawn(cmd) => self.spawn_program(cmd),
             WKeyCommand::Destroy => self.destroy_window()?,
             WKeyCommand::AdjustMainWidth(dir) => self.adjust_main_width(dir)?,
-            WKeyCommand::Layout(layout) => self.update_workspace_layout(layout),
-            WKeyCommand::SelectWorkspace(idx) => self.select_workspace(idx, true).unwrap(),
-            WKeyCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_workspace(ws_idx)?,
+            WKeyCommand::Layout(layout) => self.update_layout(layout),
+            WKeyCommand::SelectWorkspace(idx) => self.select_tag(idx, true)?,
+            WKeyCommand::MoveClientToWorkspace(ws_idx) => self.move_client_to_tag(ws_idx)?,
             WKeyCommand::MoveClientToMonitor(dir) => self.move_client_to_monitor(dir)?,
             WKeyCommand::UnFloat => self.unfloat_focused_client()?,
             WKeyCommand::Fullscreen => self.fullscreen_focused_client()?,
@@ -807,147 +712,139 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn fullscreen_focused_client(&mut self) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = &self.focused_client {
-            let c = c.borrow_mut();
-            let m = self.monitors.get(c.monitor).unwrap();
+        let m = &self.monitors[self.selmon];
+        if let Some(c) = m.selected_client() {
             let fullscreen = !c.is_fullscreen;
-            self.fullscreen(c, &m, fullscreen)?;
+            self.fullscreen(self.selmon, fullscreen)?;
         }
         Ok(())
     }
 
-    fn fullscreen(
-        &self,
-        mut c: RefMut<'_, WClientState>,
-        m: &Rc<RefCell<WMonitor<C>>>,
-        fullscreen: bool,
-    ) -> Result<(), ReplyOrIdError> {
-        if fullscreen && !c.is_fullscreen {
-            self.conn.change_property32(
-                PropMode::REPLACE,
-                c.window,
-                self.atoms._NET_WM_STATE,
-                self.atoms.ATOM,
-                &[self.atoms._NET_WM_STATE_FULLSCREEN],
-            )?;
-            c.is_fullscreen = true;
-            c.old_state = c.is_floating;
-            c.old_bw = c.bw;
-            c.bw = 0;
-            c.is_floating = true;
-            let rect = m.borrow().rect;
-            let bh = util::bar_height();
-            self.resize_client(c, rect.x, rect.y - bh as i16, rect.w, rect.h + bh)?;
-        } else if !fullscreen && c.is_fullscreen {
-            self.conn.change_property32(
-                PropMode::REPLACE,
-                c.window,
-                self.atoms._NET_WM_STATE,
-                self.atoms.ATOM,
-                &[0],
-            )?;
-            c.is_fullscreen = false;
-            c.is_floating = c.old_state;
-            c.bw = c.old_bw;
-            let r = c.old_rect;
-            self.resize_client(c, r.x, r.y, r.w, r.h)?;
-            self.recompute_layout(&m)?;
+    fn fullscreen(&mut self, mon_idx: usize, fullscreen: bool) -> Result<(), ReplyOrIdError> {
+        let rect = self.monitors[mon_idx].rect;
+        let idx = self.monitors[mon_idx].client.unwrap();
+        if let Some(c) = self.monitors[mon_idx].selected_client_mut() {
+            if fullscreen && !c.is_fullscreen {
+                self.conn.change_property32(
+                    PropMode::REPLACE,
+                    c.window,
+                    self.atoms._NET_WM_STATE,
+                    self.atoms.ATOM,
+                    &[self.atoms._NET_WM_STATE_FULLSCREEN],
+                )?;
+                c.is_fullscreen = true;
+                c.old_state = c.is_floating;
+                c.old_bw = c.bw;
+                c.bw = 0;
+                c.is_floating = true;
+                let bh = util::bar_height();
+                self.resize_client(
+                    idx,
+                    mon_idx,
+                    rect.x,
+                    rect.y - bh as i16,
+                    rect.w,
+                    rect.h + bh,
+                )?;
+            } else if !fullscreen && c.is_fullscreen {
+                self.conn.change_property32(
+                    PropMode::REPLACE,
+                    c.window,
+                    self.atoms._NET_WM_STATE,
+                    self.atoms.ATOM,
+                    &[0],
+                )?;
+                c.is_fullscreen = false;
+                c.is_floating = c.old_state;
+                c.bw = c.old_bw;
+                let r = c.old_rect;
+                self.resize_client(idx, mon_idx, r.x, r.y, r.w, r.h)?;
+                self.recompute_layout(self.selmon)?;
+            }
         }
+
         Ok(())
     }
 
     fn unfloat_focused_client(&mut self) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = &self.focused_client {
-            let mut c = c.borrow_mut();
+        let m = &mut self.monitors[self.selmon];
+        if let Some(c) = m.selected_client_mut() {
             if !c.is_floating {
                 return Ok(());
             }
 
             c.is_floating = false;
             let pos = Pos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
-            drop(c);
 
-            let mon = self.focused_monitor.borrow();
-            if let Some(dir) = mon.find_adjacent_monitor(pos) {
-                drop(mon);
+            if let Some(dir) = m.find_adjacent_monitor(pos) {
                 self.move_client_to_monitor(dir).unwrap();
             }
-            self.recompute_layout(&self.focused_monitor)?;
+            self.recompute_layout(self.selmon)?;
             self.warp_pointer_to_focused_client()?;
         }
         Ok(())
     }
 
     fn adjust_main_width(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
-        {
-            let mut ws = self.focused_workspace.borrow_mut();
-            match dir {
-                WDirection::Prev if ws.width_factor - WIDTH_ADJUSTMENT_FACTOR >= 0.05 => {
-                    ws.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
-                }
-                WDirection::Next if ws.width_factor <= 0.95 => {
-                    ws.width_factor += WIDTH_ADJUSTMENT_FACTOR;
-                }
-                _ => {}
+        let mut m = &mut self.monitors[self.selmon];
+        match dir {
+            WDirection::Prev if m.width_factor - WIDTH_ADJUSTMENT_FACTOR >= 0.05 => {
+                m.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
             }
+            WDirection::Next if m.width_factor <= 0.95 => {
+                m.width_factor += WIDTH_ADJUSTMENT_FACTOR;
+            }
+            _ => {}
         }
-        self.recompute_layout(&self.focused_monitor)?;
+        self.recompute_layout(self.selmon)?;
         Ok(())
     }
 
     fn move_client_to_monitor(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
-        if self.focused_client.is_none() {
+        if self.monitors[self.selmon].client.is_none() {
             return Ok(());
         }
+
         let idx = match dir {
-            WDirection::Prev => self.monitors.prev_index(true, false).unwrap(),
-            WDirection::Next => self.monitors.next_index(true, false).unwrap(),
+            WDirection::Prev if self.selmon == 0 => self.monitors.len() - 1,
+            WDirection::Prev => self.selmon - 1,
+            WDirection::Next if self.selmon == self.monitors.len() - 1 => 0,
+            WDirection::Next => self.selmon + 1,
         };
 
-        if idx == self.monitors.index() {
+        if idx == self.selmon {
             return Ok(());
         }
 
-        self.unfocus()?;
+        self.unfocus(self.selmon)?;
 
-        if let Some(mut removed) = self.focused_workspace.borrow_mut().remove_focused() {
-            let mut m = self.monitors.get_mut(idx).unwrap();
-            let ws_idx = m.workspaces.index();
-            removed.workspace = ws_idx;
-            removed.monitor = idx;
+        let m = &mut self.monitors[self.selmon];
+        let mut c = m.remove_client(m.client.unwrap());
 
-            m.bar.set_has_clients(ws_idx, true);
-            m.add_client_to_workspace(ws_idx, removed);
-        }
+        let dest_mon = &mut self.monitors[idx];
+        c.monitor = idx;
+        c.tag = dest_mon.tag;
 
-        let rc = self.monitors.get(idx).unwrap();
-        self.recompute_layout(&rc)?;
-        self.recompute_layout(&self.focused_monitor)?;
+        dest_mon.push_client(c);
+
+        self.recompute_layout(idx)?;
+        self.recompute_layout(self.selmon)?;
 
         self.focus()?;
         self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
-    fn move_client_to_workspace(&mut self, ws_idx: usize) -> Result<(), ReplyOrIdError> {
-        if self.focused_client.is_none() {
+    fn move_client_to_tag(&mut self, new_tag: usize) -> Result<(), ReplyOrIdError> {
+        if self.monitors[self.selmon].client.is_none() || self.monitors[self.selmon].tag == new_tag
+        {
             return Ok(());
         }
 
-        let focused_ws_idx = self.focused_monitor.borrow().workspaces.index();
-        if focused_ws_idx == ws_idx {
-            return Ok(());
-        }
-
-        self.unfocus()?;
-        if let Some(mut removed) = self.focused_workspace.borrow_mut().remove_focused() {
-            removed.workspace = ws_idx;
-            self.focused_monitor
-                .borrow_mut()
-                .add_client_to_workspace(ws_idx, removed);
-        }
-        self.recompute_layout(&self.focused_monitor)?;
+        self.unfocus(self.selmon)?;
+        self.monitors[self.selmon].client_to_tag(&self.conn, new_tag)?;
         self.focus()?;
+        self.recompute_layout(self.selmon)?;
         Ok(())
     }
 
@@ -959,12 +856,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Ok(_) => {}
         }
 
-        let was_managed = self.for_all_clients(|c| {
-            let c = c.borrow();
-            c.window == evt.window
-        });
-
-        if was_managed {
+        if self.for_all_clients(|c| c.window == evt.window) {
             return Ok(());
         }
 
@@ -972,13 +864,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
-        let mon = self.focused_monitor.borrow();
-        if mon.bar.has_pointer(evt.root_x, evt.root_y) {
+        let m = &self.monitors[self.selmon];
+        if m.bar.has_pointer(evt.root_x, evt.root_y) {
             return Ok(());
         }
 
-        let mon_has_pointer = mon.has_pos(Pos::from(&evt));
-        drop(mon);
+        let mon_has_pointer = m.has_pos(Pos::from(&evt));
 
         // skip monitor focus change if a window is being manipulated
         if !mon_has_pointer && self.drag_window.is_none() && self.resize_window.is_none() {
@@ -1001,9 +892,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         last_resize: u32,
         ev: MotionNotifyEvent,
     ) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = &self.focused_client {
-            let c = c.borrow_mut();
-
+        let m = &self.monitors[self.selmon];
+        if let Some(idx) = m.client {
+            let c = m.clients[idx];
             if c.is_fullscreen || ev.time - last_resize <= (1000 / 60) {
                 return Ok(());
             }
@@ -1016,36 +907,40 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 let x = c.rect.x;
                 let y = c.rect.y;
 
-                self.resize(c, x, y, nw, nh, true)?;
+                self.resize(idx, self.selmon, x, y, nw, nh, true)?;
             }
         }
         Ok(())
     }
 
     fn resize(
-        &self,
-        c: RefMut<'_, WClientState>,
+        &mut self,
+        c_idx: usize,
+        mon_idx: usize,
         x: i16,
         y: i16,
         w: u16,
         h: u16,
         interact: bool,
     ) -> Result<(), ReplyOrIdError> {
-        if self.apply_size_hints(&c, x, y, w, h, interact) {
-            self.resize_client(c, x, y, w, h)?;
+        if self.apply_size_hints(c_idx, mon_idx, x, y, w, h, interact) {
+            self.resize_client(c_idx, mon_idx, x, y, w, h)?;
         }
 
         Ok(())
     }
 
     fn resize_client(
-        &self,
-        mut c: RefMut<'_, WClientState>,
+        &mut self,
+        c_idx: usize,
+        mon_idx: usize,
         x: i16,
         y: i16,
         w: u16,
         h: u16,
     ) -> Result<(), ReplyOrIdError> {
+        let m = &mut self.monitors[mon_idx];
+        let c = &mut m.clients[c_idx];
         c.rect = Rect::new(x, y, w, h);
 
         self.conn.configure_window(
@@ -1080,9 +975,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         (oc_pos, op_pos, last_move): (Pos, Pos, u32),
         ev: MotionNotifyEvent,
     ) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = &self.focused_client {
-            let mut c = c.borrow_mut();
-
+        if let Some(c) = &mut self.monitors[self.selmon].selected_client_mut() {
             if c.is_fullscreen || ev.time - last_move <= (1000 / 60) {
                 return Ok(());
             }
@@ -1106,8 +999,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn handle_property_notify(&mut self, evt: PropertyNotifyEvent) -> Result<(), ReplyOrIdError> {
         if evt.atom == self.atoms._NET_WM_NAME {
             let title = self.get_window_title(evt.window)?;
-            self.focused_monitor
-                .borrow_mut()
+            self.monitors[self.selmon]
                 .bar
                 .update_title(self.conn, title);
         }
@@ -1115,7 +1007,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) -> Result<(), ReplyOrIdError> {
-        if self.for_all_clients(|c| c.borrow().window == evt.window) {
+        if self.for_all_clients(|c| c.window == evt.window) {
             self.unmanage(evt.window, false)?;
         }
         Ok(())
@@ -1133,6 +1025,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM,
         )?;
 
+        println!("is floating: {is_floating}");
+
         let is_fullscreen = self.window_property_exists(
             win,
             self.atoms._NET_WM_STATE_FULLSCREEN,
@@ -1140,8 +1034,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM,
         )?;
 
-        let mut ws_idx = self.focused_monitor.borrow().workspaces.index();
-        let mut mon_idx = self.monitors.index();
+        let mut mon_idx = self.selmon;
 
         let mut trans = None;
         if let Ok(reply) = self.conn.get_property(
@@ -1165,17 +1058,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 is_floating = true;
             }
 
-            if let Some(c) = self.win_to_client(t) {
-                let c = c.borrow();
-                ws_idx = c.workspace;
-                mon_idx = c.monitor;
+            if let Some((mon, _, _)) = self.win_to_client(t) {
+                mon_idx = mon;
             }
         }
 
-        let (mx, my, mw, mh) = {
-            let m = self.focused_monitor.borrow();
-            (m.rect.x, m.rect.y, m.rect.w, m.rect.h)
+        let (mrect, mtag) = {
+            let m = &self.monitors[mon_idx];
+            (m.rect, m.tag)
         };
+
+        let (mx, my, mw, mh) = (mrect.x, mrect.y, mrect.w, mrect.h);
 
         let mut x = geom.x;
         let mut y = geom.y;
@@ -1210,62 +1103,56 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.change_window_attributes(win, &change_aux)?;
 
         // this should never fail
-        let m = self.monitors.get(mon_idx).unwrap();
-        let mb = m.borrow();
-        let ws = mb.workspaces.get(ws_idx).unwrap();
-
         let rect = if is_fullscreen {
-            mb.rect
+            mrect
         } else {
             Rect::new(x, y, geom.width, geom.height)
         };
 
-        drop(mb);
+        // unfocus potentially focused client
+        self.unfocus(mon_idx)?;
 
-        ws.borrow_mut().push_client(WClientState::new(
-            win,
-            rect,
-            rect, // we use the same rect here for now
-            is_floating,
-            is_fullscreen,
-            ws_idx,
-            mon_idx,
-        ));
+        self.monitors
+            .get_mut(mon_idx)
+            .unwrap()
+            .push_client(WClientState::new(
+                win,
+                rect,
+                rect, // we use the same rect here for now
+                is_floating,
+                is_fullscreen,
+                mtag,
+                mon_idx,
+            ));
 
         self.set_client_state(win, WindowState::Normal)?;
 
-        self.recompute_layout(&m)?;
+        self.recompute_layout(mon_idx)?;
         self.conn.map_window(win)?;
         self.update_client_list()?;
 
-        self.unfocus()?;
-
         if is_fullscreen {
-            self.fullscreen(ws.borrow().focused_client().unwrap().borrow_mut(), &m, true)?;
-        }
-
-        {
-            let mut m = self.focused_monitor.borrow_mut();
-            let ws_idx = m.workspaces.index();
-            m.bar.set_has_clients(ws_idx, true);
+            self.fullscreen(mon_idx, true)?;
         }
 
         self.update_size_hints()?;
-        if mon_idx == self.monitors.index() {
+        self.focus()?;
+
+        if mon_idx == self.selmon {
+            let rect = self.monitors[self.selmon].selected_client().unwrap().rect;
             self.conn
                 .warp_pointer(0u32, win, 0, 0, 0, 0, rect.w as i16 / 2, rect.h as i16 / 2)?;
         }
-        self.focus()?;
 
         Ok(())
     }
 
-    fn win_to_client(&self, win: Window) -> Option<Rc<RefCell<WClientState>>> {
-        for m in self.monitors.inner().iter() {
-            for ws in m.borrow().workspaces.inner().iter() {
-                let c = ws.borrow().find_client_by_win(win);
-                if c.is_some() {
-                    return c;
+    fn win_to_client(&self, win: Window) -> Option<(usize, bool, usize)> {
+        for m in self.monitors.iter() {
+            for (i, c) in m.clients.iter().enumerate() {
+                if c.window == win {
+                    drop(m);
+                    return Some((c.monitor, c.is_fullscreen, i));
                 }
             }
         }
@@ -1273,40 +1160,31 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn move_adjacent(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
-        {
-            let mut ws = self.focused_workspace.borrow_mut();
-            ws.swap_with_neighbor(dir);
-        }
-
-        let focused_client = self.focused_workspace.borrow().focused_client();
-        if focused_client.is_some() {
-            self.ignore_enter = true;
-            self.recompute_layout(&self.focused_monitor)?;
-        }
-        self.focused_client = focused_client;
+        let m = &mut self.monitors[self.selmon];
+        m.swap_clients(dir);
+        self.ignore_enter = true;
+        self.recompute_layout(self.selmon)?;
         self.warp_pointer_to_focused_client()?;
         Ok(())
     }
 
-    fn recompute_layout(&self, mon: &Rc<RefCell<WMonitor<C>>>) -> Result<(), ReplyOrIdError> {
-        let mon = mon.borrow();
-        let ws = mon.focused_workspace();
-        let ws = ws.borrow();
-        let non_floating_clients = ws
-            .clients
-            .inner()
+    fn recompute_layout(&mut self, mon_idx: usize) -> Result<(), ReplyOrIdError> {
+        let mon = &mut self.monitors[mon_idx];
+        let client_indices = mon.clients_in_tag(mon.tag);
+        let client_indices: Vec<_> = client_indices
             .iter()
-            .filter(|c| !c.borrow().is_floating)
+            .filter(|i| !mon.clients[**i].is_floating)
             .collect();
 
-        let rects = layout_clients(&ws.layout, ws.width_factor, &mon, &non_floating_clients);
+        let rects = layout_clients(&mon.layout, mon.width_factor, &mon, client_indices.len());
 
         if rects.is_none() {
             return Ok(());
         }
 
-        for (client, rect) in non_floating_clients.iter().zip(rects.unwrap()) {
-            self.resize(client.borrow_mut(), rect.x, rect.y, rect.w, rect.h, false)?;
+        for (i, rect) in client_indices.iter().zip(rects.unwrap()) {
+            println!("rect for client {i}: {rect:#?}");
+            self.resize(**i, mon_idx, rect.x, rect.y, rect.w, rect.h, false)?;
         }
         Ok(())
     }
@@ -1337,37 +1215,36 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn select_workspace(&mut self, idx: usize, warp: bool) -> Result<(), ReplyOrIdError> {
-        {
-            let m = self.focused_monitor.borrow();
-            // early return since we dont want to do anything here
-            if m.is_focused_workspace(idx) {
-                return Ok(());
-            }
+    fn select_tag(&mut self, new_tag: usize, warp_pointer: bool) -> Result<(), ReplyOrIdError> {
+        if self.monitors[self.selmon].tag == new_tag {
+            return Ok(());
         }
 
-        self.focused_workspace.borrow().hide_clients(self.conn)?;
-
         {
-            let mut m = self.focused_monitor.borrow_mut();
-            m.focus_workspace_from_index(idx).unwrap();
-            self.focused_workspace = m.focused_workspace();
-            let ws = self.focused_workspace.borrow();
-            self.focused_client = ws.focused_client();
-            m.bar.update_tags(idx);
-            m.bar.update_layout_symbol(self.conn, ws.layout.to_string());
-            let title = if let Some(c) = &self.focused_client {
-                self.get_window_title(c.borrow().window)?
-            } else {
-                String::new()
-            };
-            m.bar.update_title(self.conn, title);
+            self.unfocus(self.selmon)?;
+            let m = &mut self.monitors[self.selmon];
+            m.hide_clients(&self.conn, m.tag)?;
+
+            m.set_tag(new_tag).unwrap();
+            m.bar.update_tags(new_tag);
         }
 
-        self.recompute_layout(&self.focused_monitor)?;
+        let title = if let Some(WClientState { window, .. }) =
+            self.monitors[self.selmon].selected_client()
+        {
+            let win = *window;
+            self.get_window_title(win)?
+        } else {
+            String::new()
+        };
+        self.monitors[self.selmon]
+            .bar
+            .update_title(self.conn, title);
 
+        self.recompute_layout(self.selmon)?;
         self.focus()?;
-        if warp {
+
+        if warp_pointer {
             self.warp_pointer_to_focused_client()?;
         }
 
@@ -1419,32 +1296,24 @@ impl<'a, C: Connection> WinMan<'a, C> {
         });
     }
 
-    fn unfocus(&mut self) -> Result<(), ReplyError> {
-        if let Some(client) = &self.focused_client {
-            let c = client.borrow();
+    fn unfocus(&mut self, mon_idx: usize) -> Result<(), ReplyError> {
+        let m = &mut self.monitors[mon_idx];
+        if let Some(c) = m.selected_client() {
             let unfocus_aux =
                 ChangeWindowAttributesAux::new().border_pixel(theme::window::BORDER_UNFOCUSED);
             self.conn.change_window_attributes(c.window, &unfocus_aux)?;
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
 
-            self.focused_monitor
-                .borrow_mut()
-                .bar
-                .update_title(self.conn, "");
+            m.bar.update_title(self.conn, "");
         }
 
-        self.focused_client = None;
         Ok(())
     }
 
     fn unmanage(&mut self, win: Window, destroyed: bool) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = self.win_to_client(win) {
-            let (win, ws, mon) = {
-                let c = c.borrow();
-                (c.window, c.workspace, c.monitor)
-            };
-            self.detach(win, ws, mon)?;
+        if let Some((mon, _, _)) = self.win_to_client(win) {
+            self.detach(win, mon)?;
             if !destroyed {
                 self.conn.grab_server()?;
                 self.set_client_state(win, WindowState::Withdrawn)?;
@@ -1452,12 +1321,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 self.conn.ungrab_server()?;
             }
 
-            if mon == self.monitors.index() {
+            if mon == self.selmon {
                 self.focus()?;
                 self.warp_pointer_to_focused_client()?;
             }
-            println!("DEBUG: recomputing layout after unmanage");
-            self.recompute_layout(&self.monitors.get(mon).unwrap())?;
+            self.recompute_layout(mon)?;
             self.update_client_list()?;
         }
         Ok(())
@@ -1475,7 +1343,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     self.atoms.WINDOW,
                     32,
                     1,
-                    &c.borrow().window.to_ne_bytes(),
+                    &c.window.to_ne_bytes(),
                 )
                 .unwrap();
             true
@@ -1483,19 +1351,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn update_workspace_layout(&mut self, layout: WLayout) {
-        if self.focused_workspace.borrow_mut().set_layout(layout) {
-            self.focused_monitor.borrow_mut().bar.update_layout_symbol(
-                self.conn,
-                self.focused_workspace.borrow().layout.to_string(),
-            );
-            self.recompute_layout(&self.focused_monitor).unwrap();
+    fn update_layout(&mut self, layout: WLayout) {
+        let m = &mut self.monitors[self.selmon];
+        if m.set_layout(layout) {
+            m.bar.update_layout_symbol(self.conn, m.layout.to_string());
+            self.recompute_layout(self.selmon).unwrap();
         }
     }
 
     fn warp_pointer_to_focused_client(&self) -> Result<(), ReplyOrIdError> {
-        if let Some(client) = &self.focused_client {
-            let c = client.borrow();
+        if let Some(c) = self.monitors[self.selmon].selected_client() {
             if let Ok(pointer_reply) = self.conn.query_pointer(c.window) {
                 if let Ok(pointer) = pointer_reply.reply() {
                     if !pointer.same_screen {
@@ -1518,7 +1383,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn warp_pointer_to_focused_monitor(&self) -> Result<(), ReplyOrIdError> {
-        let m = self.focused_monitor.borrow();
+        let m = &self.monitors[self.selmon];
         self.conn.warp_pointer(
             NONE,
             self.screen.root,
@@ -1545,6 +1410,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         {
             if let Ok(reply) = reply.reply() {
                 println!("check property exists");
+                println!("format: {}", reply.format);
                 let found = match reply.format {
                     8 => reply.value8().unwrap().any(|a| a == atom as u8),
                     16 => reply.value16().unwrap().any(|a| a == atom as u16),

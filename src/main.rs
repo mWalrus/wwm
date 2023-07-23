@@ -6,7 +6,6 @@ mod layouts;
 mod monitor;
 mod mouse;
 mod util;
-mod workspace;
 mod wwm;
 
 use keyboard::WKeyboard;
@@ -61,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let keyboard = WKeyboard::new(&conn, &xcb_conn, screen)?;
     let mouse = WMouse::new(&conn, screen_num);
 
-    let mut wwm = WinMan::init(&conn, screen_num, keyboard, mouse, atoms);
-    wwm.run().unwrap();
+    let mut wwm = WinMan::init(&conn, screen_num, keyboard, mouse, atoms)?;
+    wwm.run()?;
     Ok(())
 }

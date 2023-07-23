@@ -372,8 +372,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         }
 
-        println!("got mouse action: {action:?}");
-
         self.manipulate_client_dims(evt, action)?;
 
         Ok(())
@@ -690,8 +688,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 break;
             }
         }
-        println!("got action: {action:?}");
-
         match action {
             WKeyCommand::FocusClient(dir) => self.focus_adjacent(dir)?,
             WKeyCommand::MoveClient(dir) => self.move_adjacent(dir)?,
@@ -1025,8 +1021,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM,
         )?;
 
-        println!("is floating: {is_floating}");
-
         let is_fullscreen = self.window_property_exists(
             win,
             self.atoms._NET_WM_STATE_FULLSCREEN,
@@ -1051,8 +1045,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 }
             }
         }
-        println!("got transient for");
-
         if let Some(t) = trans {
             if !is_floating {
                 is_floating = true;
@@ -1183,7 +1175,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         for (i, rect) in client_indices.iter().zip(rects.unwrap()) {
-            println!("rect for client {i}: {rect:#?}");
             self.resize(**i, mon_idx, rect.x, rect.y, rect.w, rect.h, false)?;
         }
         Ok(())
@@ -1409,8 +1400,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             .get_property(false, window, prop, type_, 0, u32::MAX)
         {
             if let Ok(reply) = reply.reply() {
-                println!("check property exists");
-                println!("format: {}", reply.format);
                 let found = match reply.format {
                     8 => reply.value8().unwrap().any(|a| a == atom as u8),
                     16 => reply.value16().unwrap().any(|a| a == atom as u16),

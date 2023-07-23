@@ -298,7 +298,6 @@ impl WBar {
                 self.redraw_queue.push(Redraw::Tag(i));
             }
         }
-        println!("redraw queue after update: {:#?}", self.redraw_queue);
     }
 
     pub fn set_is_focused(&mut self, is_focused: bool) {

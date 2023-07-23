@@ -26,7 +26,6 @@ __Column layout__:
   - [x] Main-stack
   - [x] Column
   - [x] Floating (dialog windows, etc.)
-- [x] Workspace specific layout switching
 - [ ] Bar
   - [x] Workspace tags
     - [x] Focus indication

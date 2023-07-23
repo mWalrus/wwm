@@ -16,7 +16,7 @@ use crate::{
     AtomCollection,
 };
 use std::{
-    cell::{RefCell, RefMut},
+    cell::{Ref, RefCell, RefMut},
     collections::HashSet,
     process::{exit, Command},
     rc::Rc,
@@ -199,68 +199,68 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn destroy_window(&mut self) -> Result<(), ReplyOrIdError> {
-        let window = {
-            if let Some(client) = &self.focused_client {
-                client.borrow().window
-            } else {
-                return Ok(());
-            }
+        if self.focused_client.is_none() {
+            return Ok(());
+        }
+
+        let c = self.focused_client.as_mut().unwrap();
+        let (win, ws, mon) = {
+            let c = c.borrow();
+            (c.window, c.workspace, c.monitor)
         };
+        self.detach(win, ws, mon)?;
 
         let delete_exists = self.window_property_exists(
-            window,
+            win,
             self.atoms.WM_DELETE_WINDOW,
             self.atoms.WM_PROTOCOLS,
             self.atoms.ATOM,
         )?;
 
-        self.detach(window);
-
         if delete_exists {
-            self.send_event(window, self.atoms.WM_DELETE_WINDOW)?;
+            self.send_event(win, self.atoms.WM_DELETE_WINDOW)?;
         } else {
             self.conn.grab_server()?;
             self.conn.set_close_down_mode(CloseDown::DESTROY_ALL)?;
-            self.conn.kill_client(window)?;
+            self.conn.kill_client(win)?;
             self.conn.sync()?;
             self.conn.ungrab_server()?;
         }
+        self.recompute_layout(&self.monitors.get(mon).unwrap())?;
 
         self.ignore_enter = true;
         Ok(())
     }
 
-    // FIXME: take monitor and workspace affected
-    fn detach(&mut self, window: Window) {
-        let conn = self.conn;
+    fn detach(
+        &mut self,
+        win: Window,
+        workspace: usize,
+        monitor: usize,
+    ) -> Result<(), ReplyOrIdError> {
+        self.conn.grab_server()?;
+        println!("DEBUG: changing save set to delete");
+        self.conn.change_save_set(SetMode::DELETE, win)?;
+        println!("DEBUG: changed!");
+        self.conn.ungrab_server()?;
 
-        let mut ws_idx = None;
-        let mut ws = self.focused_workspace.borrow_mut();
-        ws.clients.retain(|client| {
-            let c = client.borrow();
-            if c.window != window {
-                return true;
-            }
+        let m = self.monitors.get(monitor).unwrap();
+        let mut m = m.borrow_mut();
 
-            conn.grab_server().unwrap();
-            conn.change_save_set(SetMode::DELETE, c.window).unwrap();
-            conn.ungrab_server().unwrap();
+        let ws = m.workspaces.get(workspace).unwrap();
+        let mut ws = ws.borrow_mut();
 
-            ws_idx = Some(c.workspace);
-
-            false
-        });
-
+        ws.clients.retain(|client| client.borrow().window != win);
         if ws.clients.is_empty() {
-            if let Some(i) = ws_idx {
-                self.focused_monitor
-                    .borrow_mut()
-                    .bar
-                    .set_has_clients(i, false);
-            }
+            m.bar.set_has_clients(workspace, false);
         }
 
-        self.focused_client = None;
+        if let Some(client) = &self.focused_client {
+            if client.borrow().window == win {
+                self.focused_client = None;
+            }
+        }
+        Ok(())
     }
 
     fn entered_adjacent_monitor(&mut self, win: Window) {
@@ -285,20 +285,20 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn get_window_title(&self, window: Window) -> Result<String, ReplyOrIdError> {
-        let reply = self
-            .conn
-            .get_property(
-                false,
-                window,
-                self.atoms._NET_WM_NAME,
-                self.atoms.UTF8_STRING,
-                0,
-                8,
-            )?
-            .reply()?;
-        if let Some(text) = reply.value8() {
-            let text: Vec<u8> = text.collect();
-            return Ok(String::from_utf8(text).unwrap());
+        if let Ok(reply) = self.conn.get_property(
+            false,
+            window,
+            self.atoms._NET_WM_NAME,
+            self.atoms.UTF8_STRING,
+            0,
+            8,
+        ) {
+            if let Ok(reply) = reply.reply() {
+                if let Some(text) = reply.value8() {
+                    let text: Vec<u8> = text.collect();
+                    return Ok(String::from_utf8(text).unwrap());
+                }
+            }
         }
         Ok(String::new())
     }
@@ -1140,37 +1140,37 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms.ATOM,
         )?;
 
-        let transient_for = self
-            .conn
-            .get_property(
-                false,
-                win,
-                self.atoms.WM_TRANSIENT_FOR,
-                self.atoms.WINDOW,
-                0,
-                u32::MAX,
-            )?
-            .reply()?;
-
         let mut ws_idx = self.focused_monitor.borrow().workspaces.index();
         let mut mon_idx = self.monitors.index();
 
-        if let Some(trans) = transient_for.value32() {
-            if let Some(t) = trans.collect::<Vec<u32>>().get(0) {
-                if !is_floating {
-                    is_floating = true;
-                }
-
-                if let Some(c) = self.win_to_client(*t) {
-                    let c = c.borrow();
-                    ws_idx = c.workspace;
-                    mon_idx = c.monitor;
+        let mut trans = None;
+        if let Ok(reply) = self.conn.get_property(
+            false,
+            win,
+            self.atoms.WM_TRANSIENT_FOR,
+            self.atoms.WINDOW,
+            0,
+            u32::MAX,
+        ) {
+            if let Ok(transient_for) = reply.reply() {
+                if let Some(mut it) = transient_for.value32() {
+                    trans = it.next();
                 }
             }
         }
+        println!("got transient for");
 
-        let mut conf_aux =
-            ConfigureWindowAux::new().border_width(theme::window::BORDER_WIDTH as u32);
+        if let Some(t) = trans {
+            if !is_floating {
+                is_floating = true;
+            }
+
+            if let Some(c) = self.win_to_client(t) {
+                let c = c.borrow();
+                ws_idx = c.workspace;
+                mon_idx = c.monitor;
+            }
+        }
 
         let (mx, my, mw, mh) = {
             let m = self.focused_monitor.borrow();
@@ -1190,7 +1190,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         x = x.max(mx);
         y = y.max(my);
 
-        conf_aux = conf_aux
+        let conf_aux = ConfigureWindowAux::new()
+            .border_width(theme::window::BORDER_WIDTH as u32)
             .stack_mode(StackMode::ABOVE)
             .x(x as i32)
             .y(y as i32);
@@ -1238,10 +1239,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.update_client_list()?;
 
         self.unfocus()?;
-        self.focus()?;
 
         if is_fullscreen {
-            self.fullscreen_focused_client()?;
+            self.fullscreen(ws.borrow().focused_client().unwrap().borrow_mut(), &m, true)?;
         }
 
         {
@@ -1251,7 +1251,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         self.update_size_hints()?;
-        self.warp_pointer_to_focused_client()?;
+        if mon_idx == self.monitors.index() {
+            self.conn
+                .warp_pointer(0u32, win, 0, 0, 0, 0, rect.w as i16 / 2, rect.h as i16 / 2)?;
+        }
+        self.focus()?;
 
         Ok(())
     }
@@ -1435,20 +1439,27 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn unmanage(&mut self, win: Window, destroyed: bool) -> Result<(), ReplyOrIdError> {
-        self.detach(win);
-        if !destroyed {
-            self.conn.grab_server()?;
-            self.set_client_state(win, WindowState::Withdrawn)?;
-            self.conn.sync()?;
-            self.conn.ungrab_server()?;
-        }
+        if let Some(c) = self.win_to_client(win) {
+            let (win, ws, mon) = {
+                let c = c.borrow();
+                (c.window, c.workspace, c.monitor)
+            };
+            self.detach(win, ws, mon)?;
+            if !destroyed {
+                self.conn.grab_server()?;
+                self.set_client_state(win, WindowState::Withdrawn)?;
+                self.conn.sync()?;
+                self.conn.ungrab_server()?;
+            }
 
-        // FIXME: this has to be reworked if a client gets unmanaged on a
-        //        non-focused workspace or monitor
-        self.focus()?;
-        self.update_client_list()?;
-        self.recompute_layout(&self.focused_monitor)?;
-        self.warp_pointer_to_focused_client()?;
+            if mon == self.monitors.index() {
+                self.focus()?;
+                self.warp_pointer_to_focused_client()?;
+            }
+            println!("DEBUG: recomputing layout after unmanage");
+            self.recompute_layout(&self.monitors.get(mon).unwrap())?;
+            self.update_client_list()?;
+        }
         Ok(())
     }
 
@@ -1485,20 +1496,23 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn warp_pointer_to_focused_client(&self) -> Result<(), ReplyOrIdError> {
         if let Some(client) = &self.focused_client {
             let c = client.borrow();
-            let pointer = self.conn.query_pointer(c.window)?.reply()?;
-            if !pointer.same_screen {
-                return Ok(());
+            if let Ok(pointer_reply) = self.conn.query_pointer(c.window) {
+                if let Ok(pointer) = pointer_reply.reply() {
+                    if !pointer.same_screen {
+                        return Ok(());
+                    }
+                    self.conn.warp_pointer(
+                        NONE,
+                        c.window,
+                        0,
+                        0,
+                        0,
+                        0,
+                        c.rect.w as i16 / 2,
+                        c.rect.h as i16 / 2,
+                    )?;
+                }
             }
-            self.conn.warp_pointer(
-                NONE,
-                c.window,
-                0,
-                0,
-                0,
-                0,
-                c.rect.w as i16 / 2,
-                c.rect.h as i16 / 2,
-            )?;
         }
         Ok(())
     }
@@ -1525,25 +1539,21 @@ impl<'a, C: Connection> WinMan<'a, C> {
         prop: u32,
         type_: u32,
     ) -> Result<bool, ReplyError> {
-        let reply = self
+        if let Ok(reply) = self
             .conn
-            .get_property(
-                false,
-                window,
-                prop,
-                type_,
-                0,
-                std::mem::size_of::<u32>() as u32,
-            )?
-            .reply()?;
-        let mut found = false;
-        if let Some(mut value) = reply.value32() {
-            found = value.any(|a| a == atom);
-        } else if let Some(mut value) = reply.value16() {
-            found = value.any(|a| a == atom as u16);
-        } else if let Some(mut value) = reply.value8() {
-            found = value.any(|a| a == atom as u8);
+            .get_property(false, window, prop, type_, 0, u32::MAX)
+        {
+            if let Ok(reply) = reply.reply() {
+                println!("check property exists");
+                let found = match reply.format {
+                    8 => reply.value8().unwrap().any(|a| a == atom as u8),
+                    16 => reply.value16().unwrap().any(|a| a == atom as u16),
+                    32 => reply.value32().unwrap().any(|a| a == atom),
+                    _ => false,
+                };
+                return Ok(found);
+            }
         }
-        Ok(found)
+        Ok(false)
     }
 }

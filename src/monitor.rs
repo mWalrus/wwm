@@ -66,6 +66,8 @@ impl<'a, C: Connection> WMonitor<'a, C> {
                 theme::bar::BG_SELECTED,
                 theme::bar::FG_SELECTED,
             ],
+            *theme::bar::MODULE_MASK,
+            theme::bar::STATUS_INTERVAL,
         );
 
         Self {

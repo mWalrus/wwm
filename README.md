@@ -26,14 +26,14 @@ __Column layout__:
   - [x] Main-stack
   - [x] Column
   - [x] Floating (dialog windows, etc.)
-- [ ] Bar
+- [x] Bar
   - [x] Workspace tags
     - [x] Focus indication
     - [x] "Contains-clients" indication
     - [x] Click to change focus
   - [x] Current layout indicator
   - [x] Current focused window title
-  - [ ] Modular status indicators (such as time, date, ram, cpu, etc.)
+  - [x] Modular status indicators (such as time, date, ram, cpu, etc.)
 - [x] Cursor warping on client focus change
 - [x] Customizability (configure in code)
   - [x] Theming

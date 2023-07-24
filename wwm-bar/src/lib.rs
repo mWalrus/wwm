@@ -1,6 +1,12 @@
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 use font::{FontDrawer, RenderString};
+use status_module::{WBarModMask, WBarModule};
 use util::{hex_to_rgba_color, Rect};
 use visual::RenderVisualInfo;
 use x11rb::{
@@ -15,6 +21,7 @@ use x11rb::{
 };
 
 pub mod font;
+pub mod status_module;
 mod util;
 pub mod visual;
 
@@ -23,6 +30,7 @@ enum Redraw {
     Tag(usize),
     LayoutSymbol,
     Title,
+    Modules,
 }
 
 pub struct WBar {
@@ -37,10 +45,12 @@ pub struct WBar {
     section_dims: [Rect; 3],
     section_padding: i16,
     colors: WBarColors,
-    redraw_queue: Vec<Redraw>,
+    redraw_queue: Arc<Mutex<Vec<Redraw>>>,
     has_client_gc: Gcontext,
     has_client_gc_selected: Gcontext,
     is_focused: bool,
+    modules: Vec<WBarModule>,
+    padding: u16,
 }
 
 struct WBarColors {
@@ -83,6 +93,8 @@ impl WBar {
         layout_symbol: impl ToString,
         title: impl ToString,
         colors: [u32; 4],
+        mod_mask: WBarModMask,
+        status_interval: u64,
     ) -> Self {
         let rect = rect.into();
 
@@ -205,7 +217,7 @@ impl WBar {
 
         conn.map_window(bar_win).unwrap();
 
-        Self {
+        let mut bar = Self {
             window: bar_win,
             picture,
             rect,
@@ -217,7 +229,7 @@ impl WBar {
             section_dims,
             section_padding,
             colors,
-            redraw_queue: vec![
+            redraw_queue: Arc::new(Mutex::new(vec![
                 Redraw::Tag(0),
                 Redraw::Tag(1),
                 Redraw::Tag(2),
@@ -229,11 +241,48 @@ impl WBar {
                 Redraw::Tag(8),
                 Redraw::LayoutSymbol,
                 Redraw::Title,
-            ],
+                Redraw::Modules,
+            ])),
             has_client_gc,
             has_client_gc_selected,
             is_focused: false,
+            modules: Self::init_modules(mod_mask),
+            padding,
+        };
+        bar.run_status_loop(status_interval);
+        bar
+    }
+
+    fn init_modules(mod_mask: WBarModMask) -> Vec<WBarModule> {
+        let mut modules = vec![];
+
+        if mod_mask & WBarModMask::VOL {
+            modules.push(WBarModule::vol());
         }
+        if mod_mask & WBarModMask::RAM {
+            modules.push(WBarModule::ram());
+        }
+        if mod_mask & WBarModMask::CPU {
+            modules.push(WBarModule::cpu());
+        }
+        if mod_mask & WBarModMask::DATE {
+            modules.push(WBarModule::date());
+        }
+        if mod_mask & WBarModMask::VOL {
+            modules.push(WBarModule::time());
+        }
+
+        modules
+    }
+
+    fn run_status_loop(&mut self, interval: u64) {
+        let queue = Arc::clone(&self.redraw_queue);
+        thread::spawn(move || loop {
+            if let Ok(mut queue) = queue.lock() {
+                queue.push(Redraw::Modules);
+            }
+            thread::sleep(Duration::from_millis(interval))
+        });
     }
 
     pub fn has_pointer(&self, px: i16, py: i16) -> bool {
@@ -265,7 +314,9 @@ impl WBar {
             self.layout_symbol.vertical_padding,
             self.layout_symbol.horizontal_padding,
         );
-        self.redraw_queue.push(Redraw::LayoutSymbol);
+        if let Ok(mut queue) = self.redraw_queue.lock() {
+            queue.push(Redraw::LayoutSymbol);
+        }
     }
 
     pub fn update_title<C: Connection>(&mut self, conn: &C, title: impl ToString) {
@@ -282,20 +333,28 @@ impl WBar {
         // FIXME: we need a cleaner solution for this
         let left_rect = &self.section_dims[1];
         let new_x = left_rect.x + left_rect.w as i16 + self.section_padding;
-        self.section_dims[2] =
-            Rect::new(new_x, left_rect.y, self.rect.w - new_x as u16, self.rect.h);
+        self.section_dims[2] = Rect::new(
+            new_x,
+            left_rect.y,
+            self.section_dims[2].w - self.section_padding as u16,
+            self.rect.h,
+        );
 
-        self.redraw_queue.push(Redraw::Title);
+        if let Ok(mut queue) = self.redraw_queue.lock() {
+            queue.push(Redraw::Title);
+        }
     }
 
     pub fn update_tags(&mut self, selected: usize) {
-        for (i, tag) in self.tags.iter_mut().enumerate() {
-            if tag.id == selected {
-                tag.selected = true;
-                self.redraw_queue.push(Redraw::Tag(i));
-            } else if tag.id != selected && tag.selected {
-                tag.selected = false;
-                self.redraw_queue.push(Redraw::Tag(i));
+        if let Ok(mut queue) = self.redraw_queue.lock() {
+            for (i, tag) in self.tags.iter_mut().enumerate() {
+                if tag.id == selected {
+                    tag.selected = true;
+                    queue.push(Redraw::Tag(i));
+                } else if tag.id != selected && tag.selected {
+                    tag.selected = false;
+                    queue.push(Redraw::Tag(i));
+                }
             }
         }
     }
@@ -306,89 +365,127 @@ impl WBar {
         // because we want to fill the focused tags client indicator
         // rectangle
         let idx = self.tags.iter().position(|t| t.selected).unwrap();
-        self.redraw_queue.push(Redraw::Tag(idx));
+        if let Ok(mut queue) = self.redraw_queue.lock() {
+            queue.push(Redraw::Tag(idx));
+        }
     }
 
     pub fn set_has_clients(&mut self, tag_idx: usize, has_clients: bool) {
-        let tag = &mut self.tags[tag_idx];
-        if tag.has_clients != has_clients {
-            self.redraw_queue.push(Redraw::Tag(tag_idx))
+        if let Ok(mut queue) = self.redraw_queue.lock() {
+            let tag = &mut self.tags[tag_idx];
+            if tag.has_clients != has_clients {
+                queue.push(Redraw::Tag(tag_idx))
+            }
+            tag.has_clients = has_clients;
         }
-        tag.has_clients = has_clients;
     }
 
     pub fn draw<C: Connection>(&mut self, conn: &C) {
-        if self.redraw_queue.is_empty() {
-            return;
-        }
+        if let Ok(mut queue) = self.redraw_queue.lock() {
+            if queue.is_empty() {
+                return;
+            }
 
-        for redraw_item in self.redraw_queue.drain(..) {
-            match redraw_item {
-                Redraw::Tag(i) => {
-                    let tag = &self.tags[i];
-                    let (fg, bg) = if tag.selected {
-                        (self.colors.fg_selected, self.colors.bg_selected)
-                    } else {
-                        (self.colors.fg, self.colors.bg)
-                    };
-                    self.font_drawer
-                        .draw(conn, tag.rect, &tag.text, self.picture, bg, fg)
-                        .unwrap();
+            for redraw_item in queue.drain(..) {
+                match redraw_item {
+                    Redraw::Tag(i) => {
+                        let tag = &self.tags[i];
+                        let (fg, bg) = if tag.selected {
+                            (self.colors.fg_selected, self.colors.bg_selected)
+                        } else {
+                            (self.colors.fg, self.colors.bg)
+                        };
+                        self.font_drawer
+                            .draw(conn, tag.rect, &tag.text, self.picture, bg, fg)
+                            .unwrap();
 
-                    let client_rect: Rectangle =
-                        Rect::new(tag.rect.x + 1, tag.rect.y + 1, 3, 3).into();
-                    let client_rect_fill: Rectangle =
-                        Rect::new(tag.rect.x + 1, tag.rect.y + 1, 4, 4).into();
+                        let client_rect: Rectangle =
+                            Rect::new(tag.rect.x + 1, tag.rect.y + 1, 3, 3).into();
+                        let client_rect_fill: Rectangle =
+                            Rect::new(tag.rect.x + 1, tag.rect.y + 1, 4, 4).into();
 
-                    if !tag.has_clients {
-                        continue;
+                        if !tag.has_clients {
+                            continue;
+                        }
+
+                        if tag.selected && self.is_focused {
+                            conn.poly_fill_rectangle(
+                                self.window,
+                                self.has_client_gc_selected,
+                                &[client_rect_fill],
+                            )
+                            .unwrap();
+                        } else if tag.selected && !self.is_focused {
+                            conn.poly_rectangle(
+                                self.window,
+                                self.has_client_gc_selected,
+                                &[client_rect],
+                            )
+                            .unwrap();
+                        } else if !tag.selected {
+                            conn.poly_rectangle(self.window, self.has_client_gc, &[client_rect])
+                                .unwrap();
+                        }
                     }
-
-                    if tag.selected && self.is_focused {
-                        conn.poly_fill_rectangle(
+                    Redraw::LayoutSymbol => {
+                        self.font_drawer
+                            .draw(
+                                conn,
+                                self.section_dims[1],
+                                &self.layout_symbol,
+                                self.picture,
+                                self.colors.bg,
+                                self.colors.fg,
+                            )
+                            .unwrap();
+                    }
+                    Redraw::Title => {
+                        self.font_drawer
+                            .draw(
+                                conn,
+                                self.section_dims[2],
+                                &self.title,
+                                self.picture,
+                                self.colors.bg,
+                                self.colors.fg,
+                            )
+                            .unwrap();
+                    }
+                    Redraw::Modules => {
+                        let mut strings = vec![];
+                        for module in self.modules.iter() {
+                            strings.push(module.0.update());
+                        }
+                        let text = RenderString::new(
+                            conn,
+                            &self.font_drawer,
+                            &self.vis_info,
+                            strings.join(" | "),
                             self.window,
-                            self.has_client_gc_selected,
-                            &[client_rect_fill],
-                        )
-                        .unwrap();
-                    } else if tag.selected && !self.is_focused {
-                        conn.poly_rectangle(
-                            self.window,
-                            self.has_client_gc_selected,
-                            &[client_rect],
-                        )
-                        .unwrap();
-                    } else if !tag.selected {
-                        conn.poly_rectangle(self.window, self.has_client_gc, &[client_rect])
+                            self.padding,
+                            self.padding,
+                        );
+                        let rect = Rect::new(
+                            (self.rect.w - text.box_width) as i16,
+                            0,
+                            text.box_width,
+                            self.rect.h,
+                        );
+                        self.section_dims[2].w = self.section_dims[2].x.abs_diff(rect.x);
+                        self.font_drawer
+                            .draw(
+                                conn,
+                                rect,
+                                &text,
+                                self.picture,
+                                self.colors.bg,
+                                self.colors.fg,
+                            )
                             .unwrap();
                     }
                 }
-                Redraw::LayoutSymbol => {
-                    self.font_drawer
-                        .draw(
-                            conn,
-                            self.section_dims[1],
-                            &self.layout_symbol,
-                            self.picture,
-                            self.colors.bg,
-                            self.colors.fg,
-                        )
-                        .unwrap();
-                }
-                Redraw::Title => {
-                    self.font_drawer
-                        .draw(
-                            conn,
-                            self.section_dims[2],
-                            &self.title,
-                            self.picture,
-                            self.colors.bg,
-                            self.colors.fg,
-                        )
-                        .unwrap();
-                }
             }
+            conn.flush().unwrap();
         }
-        conn.flush().unwrap();
     }
 }

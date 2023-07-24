@@ -142,15 +142,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
             // self.refresh();
             self.conn.flush()?;
 
-            while let Ok(event) = self.conn.wait_for_event() {
-                if self.handle_event(event)? == ShouldExit::Yes {
-                    break 'eventloop;
-                }
+            loop {
+                if let Ok(Some(event)) = self.conn.poll_for_event() {
+                    if self.handle_event(event)? == ShouldExit::Yes {
+                        break 'eventloop;
+                    }
 
+                    self.conn.flush()?;
+                }
                 for m in self.monitors.iter_mut() {
                     m.bar.draw(self.conn);
                 }
-                self.conn.flush()?;
             }
         }
         Ok(())

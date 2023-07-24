@@ -1,7 +1,10 @@
 pub mod theme {
     pub mod window {
+        // border color for focused windows
         pub const BORDER_FOCUSED: u32 = 0xca9ee6;
+        // border color for unfocused windows
         pub const BORDER_UNFOCUSED: u32 = 0x51576d;
+        // the width of the window border
         pub const BORDER_WIDTH: u16 = 1;
     }
 
@@ -20,14 +23,16 @@ pub mod theme {
         // so: tags and layout indicator will have 10px between them
         pub const SECTION_PADDING: i16 = 10;
         // top/bottom padding around the text in the bar in pixles
-        pub const PADDING: u16 = 5;
+        pub const PADDING: u16 = 3;
         // Only the name of the font family is required. Wwm uses fontconfig to discover
         // a monospaced font in that family and uses that for drawing text.
         pub const FONT: &str = "";
 
+        // the interval at which status modules update their content
         pub const STATUS_INTERVAL: u64 = 1000;
 
         lazy_static! {
+            // bit mask representing each status module that should be enabled
             pub static ref MODULE_MASK: WBarModMask = WBarModMask::VOL
                 | WBarModMask::RAM
                 | WBarModMask::CPU

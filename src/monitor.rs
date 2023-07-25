@@ -262,19 +262,56 @@ impl<'a, C: Connection> WMonitor<'a, C> {
 
     pub fn remove_client(&mut self, idx: usize) -> WClientState {
         let c = self.clients.remove(idx);
-        let clients = self.clients_in_tag(self.tag);
-        if clients.is_empty() {
+        let clients_in_current_tag = self.clients_in_tag(self.tag);
+        if clients_in_current_tag.is_empty() {
             self.client = None;
         } else {
-            if let Some(next) = c.next {
-                if next == *clients.first().unwrap() {
-                    self.client = c.prev;
-                } else {
-                    self.client = Some(*clients.last().unwrap());
+            for t in 0..WORKSPACE_TAG_CAP {
+                let tag_clients = self.clients_in_tag(t);
+
+                if tag_clients.is_empty() {
+                    continue;
+                }
+
+                if tag_clients.len() == 1 {
+                    self.clients[tag_clients[0]].prev = None;
+                    self.clients[tag_clients[0]].next = None;
+                    self.client = if t == self.tag { Some(0) } else { None };
+                    continue;
+                }
+
+                let first_idx = *tag_clients.first().unwrap();
+                let last_idx = *tag_clients.last().unwrap();
+
+                for (i, client_idx) in tag_clients.iter().enumerate() {
+                    let prev = if *client_idx == first_idx {
+                        last_idx
+                    } else {
+                        tag_clients[i - 1]
+                    };
+
+                    let next = if *client_idx == last_idx {
+                        first_idx
+                    } else {
+                        tag_clients[i + 1]
+                    };
+
+                    self.clients[*client_idx].prev = Some(prev);
+                    self.clients[*client_idx].next = Some(next);
+                }
+
+                if t == self.tag {
+                    if c.next == Some(first_idx) {
+                        self.client = Some(last_idx);
+                    } else if c.prev == Some(last_idx) {
+                        self.client = Some(first_idx);
+                    }
                 }
             }
         }
-        self.bar.set_has_clients(self.tag, !clients.is_empty());
+
+        self.bar
+            .set_has_clients(self.tag, !clients_in_current_tag.is_empty());
         c
     }
 

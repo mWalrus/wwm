@@ -37,8 +37,8 @@ use x11rb::{
             CloseDown, ConfigureNotifyEvent, ConfigureRequestEvent, ConfigureWindowAux,
             ConnectionExt, DestroyNotifyEvent, EnterNotifyEvent, EventMask, ExposeEvent,
             GetGeometryReply, InputFocus, KeyPressEvent, MapRequestEvent, MapState,
-            MotionNotifyEvent, PropMode, PropertyNotifyEvent, Screen, SetMode, StackMode,
-            UnmapNotifyEvent, Window,
+            MotionNotifyEvent, PropMode, PropertyNotifyEvent, Screen, StackMode, UnmapNotifyEvent,
+            Window,
         },
         ErrorKind, Event,
     },
@@ -183,31 +183,33 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         }
 
+        conn.sync()?;
+
         res
     }
 
     fn destroy_window(&mut self) -> Result<(), ReplyOrIdError> {
-        let c = if let Some(cidx) = self.monitors[self.selmon].client {
-            self.monitors[self.selmon].clients[cidx]
+        let win = if let Some(cidx) = self.monitors[self.selmon].client {
+            self.monitors[self.selmon].clients[cidx].window
         } else {
             return Ok(());
         };
 
-        self.detach(c.window, self.selmon)?;
+        self.detach(win, self.selmon);
 
         let delete_exists = self.window_property_exists(
-            c.window,
+            win,
             self.atoms.WM_DELETE_WINDOW,
             self.atoms.WM_PROTOCOLS,
             self.atoms.ATOM,
         )?;
 
         if delete_exists {
-            self.send_event(c.window, self.atoms.WM_DELETE_WINDOW)?;
+            self.send_event(win, self.atoms.WM_DELETE_WINDOW)?;
         } else {
             self.conn.grab_server()?;
             self.conn.set_close_down_mode(CloseDown::DESTROY_ALL)?;
-            self.conn.kill_client(c.window)?;
+            self.conn.kill_client(win)?;
             self.conn.sync()?;
             self.conn.ungrab_server()?;
         }
@@ -219,19 +221,13 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn detach(&mut self, win: Window, monitor: usize) -> Result<(), ReplyOrIdError> {
-        self.conn.grab_server()?;
-        self.conn.change_save_set(SetMode::DELETE, win)?;
-        self.conn.ungrab_server()?;
-
+    fn detach(&mut self, win: Window, monitor: usize) {
         let m = &mut self.monitors[monitor];
 
         let remove_idx = m.clients.iter().position(|c| c.window == win);
         if let Some(i) = remove_idx {
             m.remove_client(i);
         }
-
-        Ok(())
     }
 
     fn get_window_title(&mut self, window: Window) -> Result<String, ReplyOrIdError> {
@@ -245,8 +241,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         ) {
             if let Ok(reply) = reply.reply() {
                 if let Some(text) = reply.value8() {
-                    let text: Vec<u8> = text.collect();
-                    return Ok(String::from_utf8(text).unwrap());
+                    let text = String::from_utf8(text.collect()).unwrap();
+                    return Ok(text);
                 }
             }
         }
@@ -259,9 +255,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
             if let Some(c) = m.selected_client() {
                 (c.window, c.monitor)
             } else {
+                self.conn.set_input_focus(
+                    InputFocus::POINTER_ROOT,
+                    self.screen.root,
+                    CURRENT_TIME,
+                )?;
                 return Ok(());
             }
         };
+
+        self.conn.sync()?;
 
         let name = self.get_window_title(win)?;
         self.monitors[mon].bar.update_title(self.conn, name);
@@ -541,7 +544,19 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn update_size_hints(&mut self) -> Result<(), ReplyOrIdError> {
         if let Some(c) = self.monitors[self.selmon].selected_client_mut() {
-            let wm_size_hints = WmSizeHints::get_normal_hints(self.conn, c.window)?.reply()?;
+            let wm_size_hints = match WmSizeHints::get_normal_hints(self.conn, c.window) {
+                Ok(reply) => match reply.reply() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        println!("ERROR UNWRAPPING NORMAL HINTS REPLY: {e:?}");
+                        return Ok(());
+                    }
+                },
+                Err(e) => {
+                    println!("FAILED TO FETCH HINTS: {e:?}");
+                    return Ok(());
+                }
+            };
 
             if let Some(bs) = wm_size_hints.base_size {
                 c.base_size = bs.into();
@@ -601,12 +616,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 .sibling(None)
                 .stack_mode(None);
             self.conn.configure_window(evt.window, &aux)?;
+            self.conn.sync()?;
         }
         Ok(())
     }
 
-    fn handle_destroy(&mut self, e: DestroyNotifyEvent) -> Result<(), ReplyOrIdError> {
-        self.unmanage(e.window, true)?;
+    fn handle_destroy(&mut self, evt: DestroyNotifyEvent) -> Result<(), ReplyOrIdError> {
+        if self.win_to_client(evt.window).is_some() {
+            self.unmanage(evt.window, true)?;
+        }
         Ok(())
     }
 
@@ -690,6 +708,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 break;
             }
         }
+
         match action {
             WKeyCommand::FocusClient(dir) => self.focus_adjacent(dir)?,
             WKeyCommand::MoveClient(dir) => self.move_adjacent(dir)?,
@@ -854,7 +873,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             Ok(_) => {}
         }
 
-        if self.for_all_clients(|c| c.window == evt.window) {
+        if self.win_to_client(evt.window).is_some() {
             return Ok(());
         }
 
@@ -1005,7 +1024,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_unmap_notify(&mut self, evt: UnmapNotifyEvent) -> Result<(), ReplyOrIdError> {
-        if self.for_all_clients(|c| c.window == evt.window) {
+        if self.win_to_client(evt.window).is_some() {
             self.unmanage(evt.window, false)?;
         }
         Ok(())
@@ -1096,7 +1115,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.configure_window(win, &conf_aux)?;
         self.conn.change_window_attributes(win, &change_aux)?;
 
-        // this should never fail
         let rect = if is_fullscreen {
             mrect
         } else {
@@ -1104,7 +1122,9 @@ impl<'a, C: Connection> WinMan<'a, C> {
         };
 
         // unfocus potentially focused client
-        self.unfocus(mon_idx)?;
+        if mon_idx == self.selmon {
+            self.unfocus(mon_idx)?;
+        }
 
         self.monitors
             .get_mut(mon_idx)
@@ -1129,14 +1149,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.fullscreen(mon_idx, true)?;
         }
 
-        self.update_size_hints()?;
         self.focus()?;
+        self.update_size_hints()?;
 
         if mon_idx == self.selmon {
             let rect = self.monitors[self.selmon].selected_client().unwrap().rect;
             self.conn
-                .warp_pointer(0u32, win, 0, 0, 0, 0, rect.w as i16 / 2, rect.h as i16 / 2)?;
+                .warp_pointer(NONE, win, 0, 0, 0, 0, rect.w as i16 / 2, rect.h as i16 / 2)?;
         }
+        self.conn.flush()?;
+        self.conn.sync()?;
 
         Ok(())
     }
@@ -1179,6 +1201,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         for (i, rect) in client_indices.iter().zip(rects.unwrap()) {
             self.resize(**i, mon_idx, rect.x, rect.y, rect.w, rect.h, false)?;
         }
+        self.conn.sync()?;
         Ok(())
     }
 
@@ -1306,9 +1329,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn unmanage(&mut self, win: Window, destroyed: bool) -> Result<(), ReplyOrIdError> {
         if let Some((mon, _, _)) = self.win_to_client(win) {
-            self.detach(win, mon)?;
+            self.detach(win, mon);
             if !destroyed {
                 self.conn.grab_server()?;
+                self.conn
+                    .set_input_focus(InputFocus::POINTER_ROOT, win, CURRENT_TIME)?;
                 self.set_client_state(win, WindowState::Withdrawn)?;
                 self.conn.sync()?;
                 self.conn.ungrab_server()?;
@@ -1316,10 +1341,16 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
             if mon == self.selmon {
                 self.focus()?;
-                self.warp_pointer_to_focused_client()?;
             }
+
             self.recompute_layout(mon)?;
             self.update_client_list()?;
+
+            if self.monitors[self.selmon].client.is_some() {
+                self.warp_pointer_to_focused_client()?;
+            }
+
+            self.conn.sync()?;
         }
         Ok(())
     }

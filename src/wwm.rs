@@ -51,7 +51,6 @@ use x11rb::{
 enum WindowState {
     Withdrawn,
     Normal,
-    Iconic,
 }
 
 #[repr(u8)]

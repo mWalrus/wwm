@@ -13,7 +13,6 @@ pub enum WLayout {
     #[default]
     MainStack,
     Column,
-    Floating,
 }
 
 impl fmt::Display for WLayout {
@@ -21,7 +20,6 @@ impl fmt::Display for WLayout {
         let symbol = match self {
             WLayout::MainStack => "[]=",
             WLayout::Column => "|||",
-            WLayout::Floating => "   ",
         };
         write!(f, "{symbol}")
     }
@@ -40,7 +38,6 @@ pub fn layout_clients<C: Connection>(
     let rects = match layout {
         WLayout::MainStack => tile(monitor, width_factor, clients),
         WLayout::Column => col(monitor, clients),
-        _ => todo!(),
     };
 
     Some(rects)

@@ -39,7 +39,7 @@ pub struct WBar {
     rect: Rect,
     font_drawer: Rc<FontDrawer>,
     vis_info: Rc<RenderVisualInfo>,
-    tags: Vec<WWorkspaceTag>,
+    tags: Vec<WBarTag>,
     layout_symbol: RenderString,
     title: RenderString,
     section_dims: [Rect; 3],
@@ -61,7 +61,7 @@ struct WBarColors {
 }
 
 #[derive(Debug)]
-pub struct WWorkspaceTag {
+pub struct WBarTag {
     id: usize,
     text: RenderString,
     rect: Rect,
@@ -69,7 +69,7 @@ pub struct WWorkspaceTag {
     has_clients: bool,
 }
 
-impl WWorkspaceTag {
+impl WBarTag {
     fn new(id: usize, text: RenderString, rect: Rect, selected: bool, has_clients: bool) -> Self {
         Self {
             id,
@@ -167,7 +167,7 @@ impl WBar {
             let tag_rect = Rect::new(x_offset, rect.y, text.box_width as u16, rect.h);
             x_offset += text.box_width as i16;
 
-            tags.push(WWorkspaceTag::new(i, text, tag_rect, i == 0, false));
+            tags.push(WBarTag::new(i, text, tag_rect, i == 0, false));
         }
 
         let picture = conn.generate_id().unwrap();

@@ -250,10 +250,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn focus(&mut self) -> Result<(), ReplyOrIdError> {
         let (win, mon) = {
-            let m = &self.monitors[self.selmon];
+            let m = &mut self.monitors[self.selmon];
             if let Some(c) = m.selected_client() {
                 (c.window, c.monitor)
             } else {
+                m.bar.update_title(self.conn, "");
                 self.conn.set_input_focus(
                     InputFocus::POINTER_ROOT,
                     self.screen.root,
@@ -1331,9 +1332,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn.change_window_attributes(c.window, &unfocus_aux)?;
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
-
-            // FIXME: update this somewhere else
-            m.bar.update_title(self.conn, "");
         }
 
         Ok(())

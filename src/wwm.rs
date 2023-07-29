@@ -216,7 +216,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.focus()?;
         self.warp_pointer_to_focused_client()?;
 
-        self.ignore_enter = true;
         Ok(())
     }
 

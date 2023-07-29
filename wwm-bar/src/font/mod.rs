@@ -1,7 +1,7 @@
 pub mod loader;
 pub mod render_string;
 
-use loader::LoadedFont;
+use loader::X11Font;
 pub use render_string::RenderString;
 use thiserror::Error;
 use x11rb::{
@@ -22,18 +22,17 @@ pub enum DrawerError {
 }
 
 pub struct FontDrawer {
-    font: LoadedFont,
+    font: X11Font,
 }
 
 impl FontDrawer {
-    pub fn new(font: LoadedFont) -> Self {
+    pub fn new(font: X11Font) -> Self {
         Self { font }
     }
 
     pub fn draw<C: Connection>(
         &self,
         conn: &C,
-        // tag: &WWorkspaceTag,
         rect: Rect,
         text: &RenderString,
         dst: Picture,
@@ -47,7 +46,6 @@ impl FontDrawer {
         conn.render_fill_rectangles(PictOp::SRC, text.picture, fg, &[fg_fill_area])?;
         conn.render_fill_rectangles(PictOp::SRC, dst, bg, &[bg_fill_area])?;
 
-        // let mut offset_x = tag.text.hpad as i16;
         let mut x_offset = x + text.horizontal_padding as i16;
         for chunk in &text.chunks {
             self.draw_glyphs(

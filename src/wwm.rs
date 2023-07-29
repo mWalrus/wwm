@@ -24,7 +24,7 @@ use std::{
     time::Duration,
 };
 use wwm_bar::{
-    font::{loader::LoadedFont, FontDrawer},
+    font::{loader::X11Font, FontDrawer},
     visual::RenderVisualInfo,
 };
 use x11rb::{
@@ -99,7 +99,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::run_auto_start_commands().unwrap();
 
         let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
-        let font = LoadedFont::new(
+        let font = X11Font::new(
             conn,
             vis_info.render.pict_format,
             theme::bar::FONT,

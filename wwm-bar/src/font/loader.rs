@@ -1,4 +1,5 @@
-use fontdue::{Font, FontSettings};
+use font_loader::system_fonts as fonts;
+use fontdue::{Font as FontData, FontSettings, Metrics};
 use smallmap::Map;
 use thiserror::Error;
 use x11rb::{
@@ -6,23 +7,6 @@ use x11rb::{
     protocol::render::{ConnectionExt, Glyphinfo, Glyphset, Pictformat},
     rust_connection::{ConnectionError, ReplyOrIdError},
 };
-
-macro_rules! load_font {
-    ($font_name:expr) => {{
-        use ::font_loader::system_fonts as fonts;
-        let family = if $font_name.is_empty() {
-            "monospace"
-        } else {
-            $font_name
-        };
-        let property = fonts::FontPropertyBuilder::new()
-            .monospace()
-            .family(family)
-            .build();
-        let (font, _) = fonts::get(&property).unwrap();
-        font
-    }};
-}
 
 #[derive(Error, Debug)]
 pub enum FontError {
@@ -34,11 +18,11 @@ pub enum FontError {
     GSID(#[from] ReplyOrIdError),
 }
 
-pub struct LoadedFont {
+pub struct X11Font {
     pub gsid: Glyphset,
     pub char_map: Map<char, CharInfo>,
     pub font_height: i16,
-    pub font: Font,
+    pub font: FontData,
 }
 
 pub struct CharInfo {
@@ -55,38 +39,90 @@ pub struct FontEncodedChunk {
     pub glyph_ids: Vec<u32>,
 }
 
-impl LoadedFont {
+type RasterizationData = Vec<(char, Metrics, Vec<u8>)>;
+type CharMapData = (Vec<u32>, Vec<Glyphinfo>, Vec<u8>, Map<char, CharInfo>);
+
+impl X11Font {
     pub fn new<C: Connection>(
         conn: &C,
         pict_format: Pictformat,
-        font_name: &'static str,
+        family: &'static str,
         font_size: f32,
     ) -> Result<Self, FontError> {
-        let font = load_font!(font_name);
-        let settings = FontSettings {
-            scale: font_size,
-            ..Default::default()
-        };
-        let font = Font::from_bytes(font, settings).map_err(FontError::LoadFromBytes)?;
-
         let gsid = conn.generate_id()?;
         conn.render_create_glyph_set(gsid, pict_format)?;
 
-        let mut data = vec![];
+        let font = Self::evaluate(family, font_size)?;
+        let (data, font_height) = Self::rasterize(&font, font_size);
+        let (ids, infos, raw_data, char_map) =
+            Self::generate_char_map(conn, gsid, data, font_height);
+
+        conn.render_add_glyphs(gsid, &ids, &infos, &raw_data)
+            .unwrap();
+
+        Ok(X11Font {
+            gsid,
+            char_map,
+            font_height,
+            font,
+        })
+    }
+
+    fn current_out_size(ids: usize, infos: usize, raw_data: usize) -> usize {
+        core::mem::size_of::<u32>()
+            + core::mem::size_of::<u32>() * ids
+            + core::mem::size_of::<u32>() * infos
+            + core::mem::size_of::<u32>() * raw_data
+    }
+
+    fn rasterize(font: &FontData, size: f32) -> (RasterizationData, i16) {
+        let chars = font.chars();
+        let mut data = Vec::with_capacity(chars.len());
+
         let mut max_height = 0;
         for (c, _) in font.chars() {
-            let (metrics, bitmaps) = font.rasterize(*c, font_size);
+            let (metrics, bitmaps) = font.rasterize(*c, size);
             let height = metrics.height as i16 + metrics.ymin as i16;
             if height > max_height {
                 max_height = height;
             }
-            data.push((c, metrics, bitmaps))
+            data.push((*c, metrics, bitmaps))
         }
+        (data, max_height)
+    }
 
+    fn evaluate(family: &'static str, size: f32) -> Result<FontData, FontError> {
+        let family = if family.is_empty() {
+            "monospace"
+        } else {
+            family
+        };
+        let property = fonts::FontPropertyBuilder::new()
+            .monospace()
+            .family(family)
+            .build();
+        if let Some((font, _)) = fonts::get(&property) {
+            let settings = FontSettings {
+                scale: size,
+                ..Default::default()
+            };
+            FontData::from_bytes(font, settings).map_err(FontError::LoadFromBytes)
+        } else {
+            Err(FontError::LoadFromBytes(family))
+        }
+    }
+
+    fn generate_char_map<C: Connection>(
+        conn: &C,
+        glyphset_id: u32,
+        data: RasterizationData,
+        font_height: i16,
+    ) -> CharMapData {
         let mut ids = vec![];
         let mut infos = vec![];
         let mut raw_data = vec![];
         let mut char_map: Map<char, CharInfo> = Map::new();
+
         for (id, (c, metrics, bitmaps)) in data.into_iter().enumerate() {
             let id = id as u32;
             for byte in bitmaps {
@@ -98,7 +134,7 @@ impl LoadedFont {
                 width: metrics.width as u16,
                 height: metrics.height as u16,
                 x: -metrics.xmin as i16,
-                y: metrics.height as i16 - max_height + metrics.ymin as i16,
+                y: metrics.height as i16 - font_height + metrics.ymin as i16,
                 x_off: horizontal_space,
                 y_off: metrics.advance_height as i16,
             };
@@ -106,7 +142,7 @@ impl LoadedFont {
             ids.push(id);
             infos.push(glyph_info);
             char_map.insert(
-                *c,
+                c,
                 CharInfo {
                     glyph_id: id,
                     horizontal_space,
@@ -114,22 +150,16 @@ impl LoadedFont {
                 },
             );
 
-            let current_out_size = current_out_size(ids.len(), infos.len(), raw_data.len());
+            let current_out_size = Self::current_out_size(ids.len(), infos.len(), raw_data.len());
             if current_out_size >= 32768 {
-                conn.render_add_glyphs(gsid, &ids, &infos, &raw_data)?;
+                conn.render_add_glyphs(glyphset_id, &ids, &infos, &raw_data)
+                    .unwrap();
                 ids.clear();
                 infos.clear();
                 raw_data.clear();
             }
         }
-        conn.render_add_glyphs(gsid, &ids, &infos, &raw_data)?;
-
-        Ok(LoadedFont {
-            gsid,
-            char_map,
-            font_height: max_height,
-            font,
-        })
+        (ids, infos, raw_data, char_map)
     }
 
     pub fn geometry(&self, text: &str) -> (i16, u16) {
@@ -198,11 +228,4 @@ impl LoadedFont {
         }
         chunks
     }
-}
-
-fn current_out_size(ids: usize, infos: usize, raw_data: usize) -> usize {
-    core::mem::size_of::<u32>()
-        + core::mem::size_of::<u32>() * ids
-        + core::mem::size_of::<u32>() * infos
-        + core::mem::size_of::<u32>() * raw_data
 }

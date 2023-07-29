@@ -11,7 +11,7 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, Pos, Rect, Size, WDirection},
+    util::{self, Pos, Rect, WConfigWindow, WDirection},
     AtomCollection,
 };
 use std::{
@@ -321,7 +321,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn focus_at_pointer(&mut self, evt: &MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
-        for (i, m) in self.monitors.iter_mut().enumerate() {
+        for (i, m) in self.monitors.iter().enumerate() {
             if m.has_pos(Pos::from(evt)) && i != self.selmon {
                 self.unfocus(self.selmon)?;
                 self.selmon = i;
@@ -445,10 +445,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
         mut w: u16,
         mut h: u16,
         interact: bool,
-    ) -> bool {
-        let mut m = &self.monitors[mon_idx];
-        let mut c = &m.clients[c_idx];
+    ) -> Result<bool, ReplyOrIdError> {
+        let m = &self.monitors[mon_idx];
         let mon_rect = m.rect;
+        let c = &mut self.monitors[mon_idx].clients[c_idx];
 
         w = w.min(1);
         h = h.min(1);
@@ -460,10 +460,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         if interact {
             if x > sw {
-                x = sw - c.width() as i16;
+                x = sw - (c.rect.w + 2 * c.bw) as i16;
             }
             if y > sh {
-                y = sh - c.height() as i16;
+                y = sh - (c.rect.h + 2 * c.bw) as i16;
             }
             if (x + w as i16 + 2 * c.bw as i16) < 0 {
                 x = 0;
@@ -473,10 +473,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
         } else {
             if x >= mon_rect.x + mon_rect.w as i16 {
-                x = mon_rect.x + mon_rect.w as i16 - c.width() as i16;
+                x = mon_rect.x + mon_rect.w as i16 - (c.rect.w + 2 * c.bw) as i16;
             }
             if y >= mon_rect.y + mon_rect.h as i16 {
-                y = mon_rect.y + mon_rect.h as i16 - c.height() as i16;
+                y = mon_rect.y + mon_rect.h as i16 - (c.rect.h + 2 * c.bw) as i16;
             }
             if (x + w as i16 + 2 * c.bw as i16) <= mon_rect.x {
                 x = mon_rect.x;
@@ -494,110 +494,25 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
         if c.is_floating {
             if !c.hints_valid {
-                // FIXME: error handling
-                self.update_size_hints().unwrap();
-                m = &self.monitors[self.selmon];
-                c = &m.clients[c_idx];
-            }
-
-            // ICCCM 4.1.2.3
-            let base_is_min = c.base_size.w == c.min_size.w && c.base_size.h == c.min_size.h;
-            if base_is_min {
-                w -= c.base_size.w;
-                h -= c.base_size.h;
-            }
-
-            if c.mina > 0f32 && c.maxa > 0f32 {
-                if c.maxa < w as f32 / h as f32 {
-                    w = (h as f32 * c.maxa + 0.5) as u16;
-                }
-                if c.mina < h as f32 / w as f32 {
-                    h = (w as f32 * c.mina + 0.5) as u16;
+                if let Ok(hints) = Self::get_normal_hints(&self.conn, c.window) {
+                    c.apply_size_hints(hints);
                 }
             }
-            if base_is_min {
-                w -= c.base_size.w;
-                h -= c.base_size.h;
-            }
 
-            if c.inc_size.w > 0 {
-                w -= w % c.inc_size.w;
-            }
-            if c.inc_size.h > 0 {
-                h -= h % c.inc_size.h;
-            }
-
-            w = c.min_size.w.max(w + c.base_size.w);
-            h = c.min_size.h.max(h + c.base_size.h);
-
-            if c.max_size.w > 0 {
-                w = w.min(c.max_size.w)
-            }
-            if c.max_size.h > 0 {
-                h = h.min(c.max_size.h);
-            }
+            (w, h) = c.adjust_aspect_ratio(w, h);
         }
 
-        x != c.rect.x || y != c.rect.y || w != c.rect.w || h != c.rect.h
+        Ok(x != c.rect.x || y != c.rect.y || w != c.rect.w || h != c.rect.h)
     }
 
-    fn update_size_hints(&mut self) -> Result<(), ReplyOrIdError> {
-        if let Some(c) = self.monitors[self.selmon].selected_client_mut() {
-            let wm_size_hints = match WmSizeHints::get_normal_hints(self.conn, c.window) {
-                Ok(reply) => match reply.reply() {
-                    Ok(r) => r,
-                    Err(e) => {
-                        println!("ERROR UNWRAPPING NORMAL HINTS REPLY: {e:?}");
-                        return Ok(());
-                    }
-                },
-                Err(e) => {
-                    println!("FAILED TO FETCH HINTS: {e:?}");
-                    return Ok(());
-                }
-            };
-
-            if let Some(bs) = wm_size_hints.base_size {
-                c.base_size = bs.into();
-            } else if let Some(ms) = wm_size_hints.min_size {
-                c.base_size = ms.into();
-            } else {
-                c.base_size = Size::default();
-            }
-
-            if let Some(is) = wm_size_hints.size_increment {
-                c.inc_size = is.into();
-            } else {
-                c.inc_size = Size::default();
-            }
-
-            if let Some(ms) = wm_size_hints.max_size {
-                c.max_size = ms.into();
-            } else {
-                c.max_size = Size::default();
-            }
-
-            if let Some(ms) = wm_size_hints.min_size {
-                c.min_size = ms.into();
-            } else {
-                c.min_size = Size::default();
-            }
-
-            if let Some((min_a, max_a)) = wm_size_hints.aspect {
-                c.mina = min_a.numerator as f32 / min_a.denominator as f32;
-                c.maxa = max_a.numerator as f32 / max_a.denominator as f32;
-            } else {
-                c.mina = 0f32;
-                c.maxa = 0f32;
-            }
-
-            c.is_fixed = c.max_size.w > 0
-                && c.max_size.h > 0
-                && c.max_size.w == c.min_size.w
-                && c.max_size.h == c.min_size.h;
-            c.hints_valid = true;
+    fn get_normal_hints(conn: &C, win: Window) -> Result<WmSizeHints, ReplyOrIdError> {
+        match WmSizeHints::get_normal_hints(conn, win) {
+            Ok(r) => match r.reply() {
+                Ok(hints) => Ok(hints),
+                Err(e) => Err(e)?,
+            },
+            Err(e) => Err(e)?,
         }
-        Ok(())
     }
 
     fn handle_button_release(&mut self, evt: ButtonReleaseEvent) -> Result<(), ReplyError> {
@@ -609,14 +524,101 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn handle_configure_request(&mut self, evt: ConfigureRequestEvent) -> Result<(), ReplyError> {
-        if evt.window == self.screen.root {
+    fn handle_configure_request(
+        &mut self,
+        evt: ConfigureRequestEvent,
+    ) -> Result<(), ReplyOrIdError> {
+        if let Some((mon_idx, client_idx)) = self.win_to_client(evt.window) {
+            let mr = self.monitors[mon_idx].rect;
+            let WClientState {
+                mut rect,
+                mut old_rect,
+                is_floating,
+                bw,
+                monitor,
+                ..
+            } = self.monitors[mon_idx].clients[client_idx];
+            let value_mask = WConfigWindow::from(evt.value_mask);
+            if value_mask & WConfigWindow::BORDER_WIDTH {
+                self.monitors[mon_idx].clients[client_idx].bw = evt.border_width;
+            } else if is_floating {
+                if value_mask & WConfigWindow::X {
+                    old_rect.x = rect.x;
+                    rect.x = mr.x + evt.x;
+                }
+
+                if value_mask & WConfigWindow::Y {
+                    old_rect.y = rect.y;
+                    rect.y = mr.y + evt.y;
+                }
+
+                if value_mask & WConfigWindow::WIDTH {
+                    old_rect.w = rect.w;
+                    rect.w = evt.width;
+                }
+
+                if value_mask & WConfigWindow::HEIGHT {
+                    old_rect.h = rect.h;
+                    rect.h = evt.height;
+                }
+
+                if rect.x + rect.w as i16 > mr.x + mr.w as i16 && is_floating {
+                    rect.x = mr.x + (mr.w as i16 / 2 - (rect.w + 2 * bw) as i16 / 2)
+                }
+                if rect.y + rect.h as i16 > mr.y + mr.h as i16 && is_floating {
+                    rect.y = mr.y + (mr.h as i16 / 2 - (rect.h + 2 * bw) as i16 / 2)
+                }
+
+                {
+                    let c = &mut self.monitors[mon_idx].clients[client_idx];
+                    c.bw = bw;
+                    c.rect = rect;
+                    c.old_rect = old_rect;
+                }
+                if value_mask & (WConfigWindow::X | WConfigWindow::Y)
+                    && !(value_mask & (WConfigWindow::WIDTH | WConfigWindow::HEIGHT))
+                {
+                    let WClientState {
+                        rect, bw, window, ..
+                    } = self.monitors[mon_idx].clients[client_idx];
+                    self.configure_client(window, rect, bw)?;
+                }
+                if monitor == self.selmon {
+                    self.resize_client(client_idx, mon_idx, rect.x, rect.y, rect.w, rect.h)?;
+                }
+            } else {
+                let WClientState {
+                    rect, bw, window, ..
+                } = self.monitors[mon_idx].clients[client_idx];
+                self.configure_client(window, rect, bw)?;
+            }
+        } else if evt.window == self.screen.root {
             let aux = ConfigureWindowAux::from_configure_request(&evt)
                 .sibling(None)
                 .stack_mode(None);
             self.conn.configure_window(evt.window, &aux)?;
-            self.conn.sync()?;
+        } else {
+            let conf_aux = ConfigureWindowAux::from_configure_request(&evt);
+            self.conn.configure_window(evt.window, &conf_aux)?;
         }
+        self.conn.sync()?;
+        Ok(())
+    }
+
+    fn configure_client(&mut self, win: Window, rect: Rect, bw: u16) -> Result<(), ReplyOrIdError> {
+        let mut ce = ConfigureNotifyEvent::default();
+        ce.response_type = 22; // ConfigureNotify
+        ce.event = win;
+        ce.window = win;
+        ce.x = rect.x;
+        ce.y = rect.y;
+        ce.width = rect.w;
+        ce.height = rect.h;
+        ce.border_width = bw;
+        ce.override_redirect = false;
+        self.conn
+            .send_event(false, win, EventMask::STRUCTURE_NOTIFY, ce)?;
+
         Ok(())
     }
 
@@ -647,9 +649,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        if let Some((mon, _, i)) = self.win_to_client(entered_win) {
+        if let Some((mon_idx, client_idx)) = self.win_to_client(entered_win) {
             self.unfocus(self.selmon)?;
-            self.monitors[mon].client = Some(i);
+            // FIXME: update self.selmon
+            self.monitors[mon_idx].client = Some(client_idx);
             self.focus()?;
         }
 
@@ -683,10 +686,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
             if data[1] == self.atoms._NET_WM_STATE_FULLSCREEN
                 || data[2] == self.atoms._NET_WM_STATE_FULLSCREEN
             {
-                if let Some((mon, is_fullscreen, _)) = self.win_to_client(evt.window) {
+                if let Some((mon_idx, client_idx)) = self.win_to_client(evt.window) {
+                    let c = &self.monitors[mon_idx].clients[client_idx];
                     let fullscreen = data[0] == self.atoms._NET_WM_STATE_ADD
-                        || (data[0] == self.atoms._NET_WM_STATE_TOGGLE && !is_fullscreen);
-                    self.fullscreen(mon, fullscreen)?;
+                        || (data[0] == self.atoms._NET_WM_STATE_TOGGLE && !c.is_fullscreen);
+                    self.fullscreen(mon_idx, fullscreen)?;
                 }
             }
         }
@@ -865,18 +869,36 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn handle_map_request(&mut self, evt: MapRequestEvent) -> Result<(), ReplyOrIdError> {
-        let wa = self.conn.get_window_attributes(evt.window)?;
-        match wa.reply() {
-            Ok(wa) if wa.override_redirect => return Ok(()),
-            Err(e) => return Err(e)?,
-            Ok(_) => {}
-        }
+        match self.conn.get_window_attributes(evt.window) {
+            Ok(reply) => match reply.reply() {
+                Ok(wa) if wa.override_redirect => return Ok(()),
+                _ => {}
+            },
+            _ => {}
+        };
 
         if self.win_to_client(evt.window).is_some() {
             return Ok(());
         }
 
-        self.manage_window(evt.window, &self.conn.get_geometry(evt.window)?.reply()?)
+        let geom = match self.conn.get_geometry(evt.window) {
+            Ok(geom_reply) => match geom_reply.reply() {
+                Ok(geom) => geom,
+                Err(e) => {
+                    println!(
+                        "ERROR: unwrap geometry reply for win {}: {e:#?}",
+                        evt.window
+                    );
+                    return Ok(());
+                }
+            },
+            Err(e) => {
+                println!("ERROR: geometry request for win {}: {e:#?}", evt.window);
+                return Ok(());
+            }
+        };
+
+        self.manage_window(evt.window, &geom)
     }
 
     fn handle_motion_notify(&mut self, evt: MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
@@ -939,8 +961,10 @@ impl<'a, C: Connection> WinMan<'a, C> {
         h: u16,
         interact: bool,
     ) -> Result<(), ReplyOrIdError> {
-        if self.apply_size_hints(c_idx, mon_idx, x, y, w, h, interact) {
-            self.resize_client(c_idx, mon_idx, x, y, w, h)?;
+        if let Ok(succeeded) = self.apply_size_hints(c_idx, mon_idx, x, y, w, h, interact) {
+            if succeeded {
+                self.resize_client(c_idx, mon_idx, x, y, w, h)?;
+            }
         }
 
         Ok(())
@@ -955,34 +979,26 @@ impl<'a, C: Connection> WinMan<'a, C> {
         w: u16,
         h: u16,
     ) -> Result<(), ReplyOrIdError> {
-        let m = &mut self.monitors[mon_idx];
-        let c = &mut m.clients[c_idx];
-        c.rect = Rect::new(x, y, w, h);
+        {
+            let m = &mut self.monitors[mon_idx];
+            let c = &mut m.clients[c_idx];
+            c.rect = Rect::new(x, y, w, h);
 
-        self.conn.configure_window(
-            c.window,
-            &ConfigureWindowAux::new()
-                .x(x as i32)
-                .y(y as i32)
-                .width(w as u32)
-                .height(h as u32)
-                .border_width(c.bw as u32),
-        )?;
+            self.conn.configure_window(
+                c.window,
+                &ConfigureWindowAux::new()
+                    .x(x as i32)
+                    .y(y as i32)
+                    .width(w as u32)
+                    .height(h as u32)
+                    .border_width(c.bw as u32),
+            )?;
+        }
 
-        let mut ce = ConfigureNotifyEvent::default();
-        ce.response_type = 22; // ConfigureNotify
-        ce.event = c.window;
-        ce.window = c.window;
-        ce.x = c.rect.x;
-        ce.y = c.rect.y;
-        ce.width = c.rect.w;
-        ce.height = c.rect.h;
-        ce.border_width = c.bw;
-        ce.override_redirect = false;
-        self.conn
-            .send_event(false, c.window, EventMask::STRUCTURE_NOTIFY, ce)?;
-
-        self.conn.sync()?;
+        let WClientState {
+            window, rect, bw, ..
+        } = self.monitors[mon_idx].clients[c_idx];
+        self.configure_client(window, rect, bw)?;
         Ok(())
     }
 
@@ -1034,7 +1050,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         win: Window,
         geom: &GetGeometryReply,
     ) -> Result<(), ReplyOrIdError> {
-        let mut is_floating = self.window_property_exists(
+        let is_floating = self.window_property_exists(
             win,
             self.atoms._NET_WM_WINDOW_TYPE_DIALOG,
             self.atoms._NET_WM_WINDOW_TYPE,
@@ -1047,8 +1063,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.atoms._NET_WM_STATE,
             self.atoms.ATOM,
         )?;
-
-        let mut mon_idx = self.selmon;
 
         let mut trans = None;
         if let Ok(reply) = self.conn.get_property(
@@ -1065,41 +1079,59 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 }
             }
         }
-        if let Some(t) = trans {
-            if !is_floating {
-                is_floating = true;
-            }
-
-            if let Some((mon, _, _)) = self.win_to_client(t) {
-                mon_idx = mon;
-            }
-        }
-
         let (mrect, mtag) = {
-            let m = &self.monitors[mon_idx];
+            let m = &self.monitors[self.selmon];
             (m.rect, m.tag)
         };
 
         let (mx, my, mw, mh) = (mrect.x, mrect.y, mrect.w, mrect.h);
 
-        let mut x = geom.x;
-        let mut y = geom.y;
+        let rect = if is_fullscreen {
+            mrect
+        } else {
+            let mut rect = Rect::from(geom);
 
-        if geom.x + geom.width as i16 > mx + mw as i16 {
-            x = mx + mw as i16 - geom.width as i16 - (theme::window::BORDER_WIDTH as i16 * 2)
+            if rect.x + rect.w as i16 > mx + mw as i16 {
+                rect.x = mx + mw as i16 - rect.w as i16 - (theme::window::BORDER_WIDTH as i16 * 2)
+            }
+            if rect.y + rect.h as i16 > my + mh as i16 {
+                rect.y = my + mh as i16 + rect.h as i16 - (theme::window::BORDER_WIDTH as i16 * 2)
+            }
+
+            rect.x = rect.x.max(mx);
+            rect.y = rect.y.max(my);
+            rect
+        };
+
+        let mut c = WClientState::new(
+            win,
+            rect,
+            rect, // we use the same rect here for now
+            is_floating,
+            is_fullscreen,
+            mtag,
+            self.selmon,
+        );
+
+        if let Ok(hints) = Self::get_normal_hints(&self.conn, win) {
+            c.apply_size_hints(hints);
         }
-        if geom.y + geom.height as i16 > my + mh as i16 {
-            y = my + mh as i16 + geom.height as i16 - (theme::window::BORDER_WIDTH as i16 * 2)
+
+        if !is_floating {
+            c.old_state = trans.is_some() || c.is_fixed;
+            c.is_floating = c.old_state;
         }
 
-        x = x.max(mx);
-        y = y.max(my);
+        if let Some(t) = trans {
+            if let Some((mon_idx, _)) = self.win_to_client(t) {
+                c.monitor = mon_idx;
+            }
+        }
 
-        let conf_aux = ConfigureWindowAux::new()
-            .border_width(theme::window::BORDER_WIDTH as u32)
-            .stack_mode(StackMode::ABOVE)
-            .x(x as i32)
-            .y(y as i32);
+        if c.is_floating {
+            self.conn
+                .configure_window(win, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE))?;
+        }
 
         let change_aux = ChangeWindowAttributesAux::new()
             .border_pixel(theme::window::BORDER_UNFOCUSED)
@@ -1111,63 +1143,43 @@ impl<'a, C: Connection> WinMan<'a, C> {
                     | EventMask::STRUCTURE_NOTIFY,
             );
 
-        self.conn.configure_window(win, &conf_aux)?;
+        self.configure_client(win, rect, c.bw)?;
         self.conn.change_window_attributes(win, &change_aux)?;
 
-        let rect = if is_fullscreen {
-            mrect
-        } else {
-            Rect::new(x, y, geom.width, geom.height)
-        };
-
-        // unfocus potentially focused client
-        if mon_idx == self.selmon {
-            self.unfocus(mon_idx)?;
+        if c.monitor == self.selmon {
+            self.unfocus(self.selmon)?;
         }
 
-        self.monitors
-            .get_mut(mon_idx)
-            .unwrap()
-            .push_client(WClientState::new(
-                win,
-                rect,
-                rect, // we use the same rect here for now
-                is_floating,
-                is_fullscreen,
-                mtag,
-                mon_idx,
-            ));
+        self.monitors[c.monitor].push_client(c);
+        self.update_client_list()?;
 
         self.set_client_state(win, WindowState::Normal)?;
 
-        self.recompute_layout(mon_idx)?;
+        self.recompute_layout(c.monitor)?;
         self.conn.map_window(win)?;
-        self.update_client_list()?;
 
         if is_fullscreen {
-            self.fullscreen(mon_idx, true)?;
+            self.fullscreen(c.monitor, true)?;
         }
 
-        self.focus()?;
-        self.update_size_hints()?;
-
-        if mon_idx == self.selmon {
-            let rect = self.monitors[self.selmon].selected_client().unwrap().rect;
+        if c.monitor == self.selmon {
             self.conn
                 .warp_pointer(NONE, win, 0, 0, 0, 0, rect.w as i16 / 2, rect.h as i16 / 2)?;
         }
+        self.focus()?;
+
         self.conn.flush()?;
         self.conn.sync()?;
 
         Ok(())
     }
 
-    fn win_to_client(&self, win: Window) -> Option<(usize, bool, usize)> {
-        for m in self.monitors.iter() {
-            for (i, c) in m.clients.iter().enumerate() {
+    fn win_to_client(&self, win: Window) -> Option<(usize, usize)> {
+        for (mi, m) in self.monitors.iter().enumerate() {
+            for (ci, c) in m.clients.iter().enumerate() {
                 if c.window == win {
                     drop(m);
-                    return Some((c.monitor, c.is_fullscreen, i));
+                    return Some((mi, ci));
                 }
             }
         }
@@ -1187,8 +1199,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let mon = &mut self.monitors[mon_idx];
         let client_indices = mon.clients_in_tag(mon.tag);
         let client_indices: Vec<_> = client_indices
-            .iter()
-            .filter(|i| !mon.clients[**i].is_floating)
+            .into_iter()
+            .filter(|i| !mon.clients[*i].is_floating)
             .collect();
 
         let rects = layout_clients(&mon.layout, mon.width_factor, &mon, client_indices.len());
@@ -1198,7 +1210,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         }
 
         for (i, rect) in client_indices.iter().zip(rects.unwrap()) {
-            self.resize(**i, mon_idx, rect.x, rect.y, rect.w, rect.h, false)?;
+            self.resize(*i, mon_idx, rect.x, rect.y, rect.w, rect.h, false)?;
         }
         self.conn.sync()?;
         Ok(())
@@ -1320,6 +1332,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             self.conn
                 .delete_property(c.window, self.atoms._NET_ACTIVE_WINDOW)?;
 
+            // FIXME: update this somewhere else
             m.bar.update_title(self.conn, "");
         }
 
@@ -1327,8 +1340,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn unmanage(&mut self, win: Window, destroyed: bool) -> Result<(), ReplyOrIdError> {
-        if let Some((mon, _, _)) = self.win_to_client(win) {
-            self.detach(win, mon);
+        if let Some((mon_idx, _)) = self.win_to_client(win) {
+            self.detach(win, mon_idx);
             if !destroyed {
                 self.conn.grab_server()?;
                 self.conn
@@ -1338,11 +1351,11 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 self.conn.ungrab_server()?;
             }
 
-            if mon == self.selmon {
+            if mon_idx == self.selmon {
                 self.focus()?;
             }
 
-            self.recompute_layout(mon)?;
+            self.recompute_layout(mon_idx)?;
             self.update_client_list()?;
 
             if self.monitors[self.selmon].client.is_some() {

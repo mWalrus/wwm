@@ -1,7 +1,9 @@
 use crate::config;
 
 use thiserror::Error;
-use x11rb::protocol::xproto::{ConfigureWindowAux, GetGeometryReply, MotionNotifyEvent};
+use x11rb::protocol::xproto::{
+    ConfigWindow, ConfigureWindowAux, GetGeometryReply, MotionNotifyEvent,
+};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Rect {
@@ -49,16 +51,19 @@ pub struct Size {
     pub h: u16,
 }
 
-impl From<(i32, i32)> for Size {
-    fn from((w, h): (i32, i32)) -> Self {
-        Self {
-            w: w as u16,
-            h: h as u16,
+impl Size {
+    pub fn from(size_hint: Option<(i32, i32)>) -> Option<Self> {
+        if let Some((w, h)) = size_hint {
+            return Some(Self {
+                w: w as u16,
+                h: h as u16,
+            });
         }
+        None
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Pos {
     pub x: i16,
     pub y: i16,
@@ -98,6 +103,37 @@ pub enum WDirection {
 pub enum StateError {
     #[error("{0} is out of bounds")]
     Bounds(usize),
+}
+
+// FIXME: remove this wrapper after updating x11rb
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub struct WConfigWindow(pub ConfigWindow);
+
+impl From<ConfigWindow> for WConfigWindow {
+    fn from(value: ConfigWindow) -> Self {
+        Self(value)
+    }
+}
+impl std::ops::BitOr for WConfigWindow {
+    type Output = WConfigWindow;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitAnd for WConfigWindow {
+    type Output = bool;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        u16::from(self.0) & u16::from(rhs.0) == u16::from(rhs.0)
+    }
+}
+
+impl WConfigWindow {
+    pub const X: Self = Self(ConfigWindow::X);
+    pub const Y: Self = Self(ConfigWindow::Y);
+    pub const WIDTH: Self = Self(ConfigWindow::WIDTH);
+    pub const HEIGHT: Self = Self(ConfigWindow::HEIGHT);
+    pub const BORDER_WIDTH: Self = Self(ConfigWindow::BORDER_WIDTH);
 }
 
 pub fn cmd_bits(cmd: &'static [&'static str]) -> Option<(&'static str, &'static [&'static str])> {

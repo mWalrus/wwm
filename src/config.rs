@@ -85,6 +85,8 @@ pub mod commands {
     static TERM_CMD: &[&str] = &["alacritty"];
     static CHATTERINO_CMD: &[&str] = &["chatterino"];
     static FLAMESHOT_CMD: &[&str] = &["flameshot", "gui"];
+    static STEAM_CMD: &[&str] = &["steam"];
+    static ROFI_CMD: &[&str] = &["rofi", "-show", "drun"];
 
     #[rustfmt::skip]
     pub fn setup_keybinds() -> Vec<WKeybind> {
@@ -92,6 +94,8 @@ pub mod commands {
             WKeybind::new(MOD | SHIFT, ks::KEY_Return, WKeyCommand::Spawn(TERM_CMD)),
             WKeybind::new(MOD,         ks::KEY_c,      WKeyCommand::Spawn(CHATTERINO_CMD)),
             WKeybind::new(NONE,        ks::KEY_Print,  WKeyCommand::Spawn(FLAMESHOT_CMD)),
+            WKeybind::new(MOD,         ks::KEY_s,      WKeyCommand::Spawn(STEAM_CMD)),
+            WKeybind::new(MOD,         ks::KEY_p,      WKeyCommand::Spawn(ROFI_CMD)),
             WKeybind::new(MOD | SHIFT, ks::KEY_k,      WKeyCommand::MoveClient(WDirection::Prev)),
             WKeybind::new(MOD | SHIFT, ks::KEY_j,      WKeyCommand::MoveClient(WDirection::Next)),
             WKeybind::new(MOD | SHIFT, ks::KEY_q,      WKeyCommand::Destroy),

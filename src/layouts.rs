@@ -5,7 +5,7 @@ use x11rb::connection::Connection;
 use crate::{
     config::theme::window::BORDER_WIDTH,
     monitor::WMonitor,
-    util::{bar_height, Rect},
+    util::{bar_height, WRect},
 };
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
@@ -30,7 +30,7 @@ pub fn layout_clients<C: Connection>(
     width_factor: f32,
     monitor: &WMonitor<C>,
     clients: usize,
-) -> Option<Vec<Rect>> {
+) -> Option<Vec<WRect>> {
     if clients == 0 {
         return None;
     }
@@ -43,7 +43,7 @@ pub fn layout_clients<C: Connection>(
     Some(rects)
 }
 
-fn tile<C: Connection>(mon: &WMonitor<C>, width_factor: f32, clients: usize) -> Vec<Rect> {
+fn tile<C: Connection>(mon: &WMonitor<C>, width_factor: f32, clients: usize) -> Vec<WRect> {
     if clients == 1 {
         return single_client(mon);
     }
@@ -52,7 +52,7 @@ fn tile<C: Connection>(mon: &WMonitor<C>, width_factor: f32, clients: usize) -> 
 
     let mut rects = vec![];
 
-    rects.push(Rect::new(
+    rects.push(WRect::new(
         mon.rect.x,
         mon.rect.y,
         main_width - BORDER_WIDTH * 2,
@@ -77,7 +77,7 @@ fn tile<C: Connection>(mon: &WMonitor<C>, width_factor: f32, clients: usize) -> 
             }
         }
 
-        rects.push(Rect::new(
+        rects.push(WRect::new(
             mon.rect.x + main_width as i16,
             cy,
             mon.rect.w - main_width - (BORDER_WIDTH * 2),
@@ -88,14 +88,14 @@ fn tile<C: Connection>(mon: &WMonitor<C>, width_factor: f32, clients: usize) -> 
     rects
 }
 
-fn col<C: Connection>(mon: &WMonitor<C>, clients: usize) -> Vec<Rect> {
+fn col<C: Connection>(mon: &WMonitor<C>, clients: usize) -> Vec<WRect> {
     if clients == 1 {
         return single_client(mon);
     }
     let mut rects = vec![];
     let client_width = mon.rect.w / clients as u16;
     for i in 0..clients {
-        rects.push(Rect::new(
+        rects.push(WRect::new(
             mon.rect.x + (i as i16 * client_width as i16),
             mon.rect.y,
             client_width - (BORDER_WIDTH * 2),
@@ -105,8 +105,8 @@ fn col<C: Connection>(mon: &WMonitor<C>, clients: usize) -> Vec<Rect> {
     rects
 }
 
-fn single_client<C: Connection>(mon: &WMonitor<C>) -> Vec<Rect> {
-    vec![Rect::new(
+fn single_client<C: Connection>(mon: &WMonitor<C>) -> Vec<WRect> {
+    vec![WRect::new(
         mon.rect.x,
         mon.rect.y,
         mon.rect.w - BORDER_WIDTH * 2,

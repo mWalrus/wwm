@@ -54,10 +54,10 @@ impl X11Font {
 
         let font = Self::evaluate(family, font_size)?;
         let (data, font_height) = Self::rasterize(&font, font_size);
-        let (ids, infos, raw_data, char_map) =
-            Self::generate_char_map(conn, gsid, data, font_height);
+        let (ids, glyphs, raw_data, char_map) =
+            Self::generate_char_map(conn, gsid, data, font_height)?;
 
-        conn.render_add_glyphs(gsid, &ids, &infos, &raw_data)
+        conn.render_add_glyphs(gsid, &ids, &glyphs, &raw_data)
             .unwrap();
 
         Ok(X11Font {
@@ -117,9 +117,9 @@ impl X11Font {
         glyphset_id: u32,
         data: RasterizationData,
         font_height: i16,
-    ) -> CharMapData {
+    ) -> Result<CharMapData, FontError> {
         let mut ids = vec![];
-        let mut infos = vec![];
+        let mut glyphs = vec![];
         let mut raw_data = vec![];
         let mut char_map: Map<char, CharInfo> = Map::new();
 
@@ -140,7 +140,7 @@ impl X11Font {
             };
 
             ids.push(id);
-            infos.push(glyph_info);
+            glyphs.push(glyph_info);
             char_map.insert(
                 c,
                 CharInfo {
@@ -150,16 +150,15 @@ impl X11Font {
                 },
             );
 
-            let current_out_size = Self::current_out_size(ids.len(), infos.len(), raw_data.len());
+            let current_out_size = Self::current_out_size(ids.len(), glyphs.len(), raw_data.len());
             if current_out_size >= 32768 {
-                conn.render_add_glyphs(glyphset_id, &ids, &infos, &raw_data)
-                    .unwrap();
+                conn.render_add_glyphs(glyphset_id, &ids, &glyphs, &raw_data)?;
                 ids.clear();
-                infos.clear();
+                glyphs.clear();
                 raw_data.clear();
             }
         }
-        (ids, infos, raw_data, char_map)
+        Ok((ids, glyphs, raw_data, char_map))
     }
 
     pub fn geometry(&self, text: &str) -> (i16, u16) {

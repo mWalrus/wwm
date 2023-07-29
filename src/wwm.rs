@@ -11,7 +11,7 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, Pos, Rect, WConfigWindow, WDirection},
+    util::{self, WConfigWindow, WDirection, WPos, WRect},
     AtomCollection,
 };
 use std::{
@@ -67,7 +67,7 @@ pub struct WinMan<'a, C: Connection> {
     monitors: Vec<WMonitor<'a, C>>,
     selmon: usize,
     pending_exposure: HashSet<Window>,
-    drag_window: Option<(Pos, Pos, u32)>,
+    drag_window: Option<(WPos, WPos, u32)>,
     resize_window: Option<u32>,
     keyboard: WKeyboard,
     mouse: WMouse,
@@ -322,7 +322,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn focus_at_pointer(&mut self, evt: &MotionNotifyEvent) -> Result<(), ReplyOrIdError> {
         for (i, m) in self.monitors.iter().enumerate() {
-            if m.has_pos(Pos::from(evt)) && i != self.selmon {
+            if m.has_pos(WPos::from(evt)) && i != self.selmon {
                 self.unfocus(self.selmon)?;
                 self.selmon = i;
                 self.focus()?;
@@ -397,8 +397,8 @@ impl<'a, C: Connection> WinMan<'a, C> {
             match action {
                 WMouseCommand::DragClient if self.drag_window.is_none() => {
                     self.drag_window = Some((
-                        Pos::from(c.rect),
-                        Pos::new(evt.root_x, evt.root_y),
+                        WPos::from(c.rect),
+                        WPos::new(evt.root_x, evt.root_y),
                         evt.time,
                     ));
                     should_recompute_layout = true;
@@ -605,7 +605,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Ok(())
     }
 
-    fn configure_client(&mut self, win: Window, rect: Rect, bw: u16) -> Result<(), ReplyOrIdError> {
+    fn configure_client(
+        &mut self,
+        win: Window,
+        rect: WRect,
+        bw: u16,
+    ) -> Result<(), ReplyOrIdError> {
         let mut ce = ConfigureNotifyEvent::default();
         ce.response_type = 22; // ConfigureNotify
         ce.event = win;
@@ -794,7 +799,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             }
 
             c.is_floating = false;
-            let pos = Pos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
+            let pos = WPos::new(c.rect.x + (c.rect.w as i16 / 2), c.rect.y);
 
             if let Some(dir) = m.find_adjacent_monitor(pos) {
                 self.move_client_to_monitor(dir).unwrap();
@@ -907,7 +912,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
             return Ok(());
         }
 
-        let mon_has_pointer = m.has_pos(Pos::from(&evt));
+        let mon_has_pointer = m.has_pos(WPos::from(&evt));
 
         // skip monitor focus change if a window is being manipulated
         if !mon_has_pointer && self.drag_window.is_none() && self.resize_window.is_none() {
@@ -982,7 +987,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         {
             let m = &mut self.monitors[mon_idx];
             let c = &mut m.clients[c_idx];
-            c.rect = Rect::new(x, y, w, h);
+            c.rect = WRect::new(x, y, w, h);
 
             self.conn.configure_window(
                 c.window,
@@ -1004,7 +1009,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn mouse_move(
         &mut self,
-        (oc_pos, op_pos, last_move): (Pos, Pos, u32),
+        (oc_pos, op_pos, last_move): (WPos, WPos, u32),
         ev: MotionNotifyEvent,
     ) -> Result<(), ReplyOrIdError> {
         if let Some(c) = &mut self.monitors[self.selmon].selected_client_mut() {
@@ -1089,7 +1094,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let rect = if is_fullscreen {
             mrect
         } else {
-            let mut rect = Rect::from(geom);
+            let mut rect = WRect::from(geom);
 
             if rect.x + rect.w as i16 > mx + mw as i16 {
                 rect.x = mx + mw as i16 - rect.w as i16 - (theme::window::BORDER_WIDTH as i16 * 2)

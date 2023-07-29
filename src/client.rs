@@ -2,23 +2,23 @@ use x11rb::{properties::WmSizeHints, protocol::xproto::Window};
 
 use crate::{
     config::theme::window::BORDER_WIDTH,
-    util::{Rect, Size},
+    util::{WRect, WSize},
 };
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct WClientState {
     pub window: Window,
-    pub rect: Rect,
-    pub old_rect: Rect,
+    pub rect: WRect,
+    pub old_rect: WRect,
     pub is_floating: bool,
     pub is_fullscreen: bool,
     pub is_fixed: bool,
     pub hints_valid: bool,
     pub bw: u16,
-    pub base_size: Option<Size>,
-    pub min_size: Option<Size>,
-    pub max_size: Option<Size>,
-    pub inc_size: Option<Size>,
+    pub base_size: Option<WSize>,
+    pub min_size: Option<WSize>,
+    pub max_size: Option<WSize>,
+    pub inc_size: Option<WSize>,
     pub maxa: Option<f32>,
     pub mina: Option<f32>,
     pub tag: usize,
@@ -32,8 +32,8 @@ pub struct WClientState {
 impl WClientState {
     pub fn new(
         window: Window,
-        rect: Rect,
-        old_rect: Rect,
+        rect: WRect,
+        old_rect: WRect,
         is_floating: bool,
         is_fullscreen: bool,
         workspace: usize,
@@ -65,27 +65,27 @@ impl WClientState {
 
     pub fn apply_size_hints(&mut self, hints: WmSizeHints) {
         if hints.base_size.is_some() {
-            self.base_size = Size::from(hints.base_size);
+            self.base_size = WSize::from(hints.base_size);
         } else if hints.min_size.is_some() {
-            self.base_size = Size::from(hints.min_size);
+            self.base_size = WSize::from(hints.min_size);
         } else {
             self.base_size = None;
         }
 
         if hints.size_increment.is_some() {
-            self.inc_size = Size::from(hints.size_increment);
+            self.inc_size = WSize::from(hints.size_increment);
         } else {
             self.inc_size = None;
         }
 
         if hints.max_size.is_some() {
-            self.max_size = Size::from(hints.max_size);
+            self.max_size = WSize::from(hints.max_size);
         } else {
             self.max_size = None;
         }
 
         if hints.min_size.is_some() {
-            self.min_size = Size::from(hints.min_size);
+            self.min_size = WSize::from(hints.min_size);
         } else {
             self.min_size = None;
         }

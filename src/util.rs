@@ -6,14 +6,14 @@ use x11rb::protocol::xproto::{
 };
 
 #[derive(Default, Debug, Clone, Copy)]
-pub struct Rect {
+pub struct WRect {
     pub x: i16,
     pub y: i16,
     pub w: u16,
     pub h: u16,
 }
 
-impl From<&GetGeometryReply> for Rect {
+impl From<&GetGeometryReply> for WRect {
     fn from(g: &GetGeometryReply) -> Self {
         Self {
             x: g.x,
@@ -24,8 +24,8 @@ impl From<&GetGeometryReply> for Rect {
     }
 }
 
-impl From<Rect> for ConfigureWindowAux {
-    fn from(cr: Rect) -> Self {
+impl From<WRect> for ConfigureWindowAux {
+    fn from(cr: WRect) -> Self {
         ConfigureWindowAux::new()
             .x(cr.x as i32)
             .y(cr.y as i32)
@@ -34,7 +34,7 @@ impl From<Rect> for ConfigureWindowAux {
     }
 }
 
-impl Rect {
+impl WRect {
     pub fn new(x: i16, y: i16, width: u16, height: u16) -> Self {
         Self {
             x,
@@ -46,12 +46,12 @@ impl Rect {
 }
 
 #[derive(Clone, Copy, Default, Debug)]
-pub struct Size {
+pub struct WSize {
     pub w: u16,
     pub h: u16,
 }
 
-impl Size {
+impl WSize {
     pub fn from(size_hint: Option<(i32, i32)>) -> Option<Self> {
         if let Some((w, h)) = size_hint {
             return Some(Self {
@@ -64,13 +64,13 @@ impl Size {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Pos {
+pub struct WPos {
     pub x: i16,
     pub y: i16,
 }
 
-impl From<Rect> for Pos {
-    fn from(value: Rect) -> Self {
+impl From<WRect> for WPos {
+    fn from(value: WRect) -> Self {
         Self {
             x: value.x,
             y: value.y,
@@ -78,7 +78,7 @@ impl From<Rect> for Pos {
     }
 }
 
-impl From<&MotionNotifyEvent> for Pos {
+impl From<&MotionNotifyEvent> for WPos {
     fn from(value: &MotionNotifyEvent) -> Self {
         Self {
             x: value.event_x,
@@ -87,7 +87,7 @@ impl From<&MotionNotifyEvent> for Pos {
     }
 }
 
-impl Pos {
+impl WPos {
     pub fn new(x: i16, y: i16) -> Self {
         Self { x, y }
     }
@@ -149,6 +149,7 @@ pub fn cmd_bits(cmd: &'static [&'static str]) -> Option<(&'static str, &'static 
     Some((cmd[0], args))
 }
 
+#[inline]
 pub const fn bar_height() -> u16 {
     config::theme::bar::FONT_SIZE as u16 + (config::theme::bar::PADDING * 2)
 }

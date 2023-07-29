@@ -17,14 +17,14 @@ use crate::{
         workspaces::{MAIN_CLIENT_WIDTH_PERCENTAGE, WORKSPACE_TAG_CAP},
     },
     layouts::WLayout,
-    util::{Pos, Rect, StateError, WDirection},
+    util::{StateError, WDirection, WPos, WRect},
 };
 
 pub struct WMonitor<'a, C: Connection> {
     pub conn: &'a C,
     pub bar: WBar,
     pub primary: bool,
-    pub rect: Rect,
+    pub rect: WRect,
     pub clients: Vec<WClientState>,
     pub client: Option<usize>,
     pub layout: WLayout,
@@ -74,7 +74,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             conn,
             bar,
             primary: mi.primary,
-            rect: Rect::new(mi.x, y, mi.width, height),
+            rect: WRect::new(mi.x, y, mi.width, height),
             clients: Vec::new(),
             client: None,
             layout,
@@ -83,13 +83,13 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         }
     }
 
-    pub fn has_pos(&self, p: Pos) -> bool {
+    pub fn has_pos(&self, p: WPos) -> bool {
         let has_x = p.x >= self.rect.x && p.x <= self.rect.x + self.rect.w as i16;
         let has_y = p.y >= self.rect.y && p.y <= self.rect.y + self.rect.h as i16;
         has_x && has_y
     }
 
-    pub fn find_adjacent_monitor(&self, p: Pos) -> Option<WDirection> {
+    pub fn find_adjacent_monitor(&self, p: WPos) -> Option<WDirection> {
         if p.x < self.rect.x {
             return Some(WDirection::Prev);
         } else if p.x > self.rect.x + self.rect.w as i16 {

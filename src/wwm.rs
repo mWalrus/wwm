@@ -651,7 +651,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
         if let Some((mon_idx, client_idx)) = self.win_to_client(entered_win) {
             self.unfocus(self.selmon)?;
-            // FIXME: update self.selmon
+            self.selmon = mon_idx;
             self.monitors[mon_idx].client = Some(client_idx);
             self.focus()?;
         }

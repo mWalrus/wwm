@@ -34,7 +34,7 @@ impl WClientState {
         old_rect: WRect,
         is_floating: bool,
         is_fullscreen: bool,
-        workspace: usize,
+        tag: usize,
         monitor: usize,
     ) -> Self {
         Self {
@@ -52,7 +52,7 @@ impl WClientState {
             inc_size: None,
             maxa: None,
             mina: None,
-            tag: workspace,
+            tag,
             monitor,
             old_state: false,
             old_bw: 0,

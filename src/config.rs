@@ -47,9 +47,13 @@ pub const fn bar_height() -> u16 {
     theme::bar::FONT_SIZE as u16 + (theme::bar::PADDING * 2)
 }
 
-pub mod workspaces {
+// configuration related to workspaces/virtual desktops/tags
+// (which are all different names referring to the same thing)
+pub mod tags {
     // amount of workspace tags per monitor
-    pub const WORKSPACE_TAG_CAP: usize = 9;
+    // NOTE: if you change this you should also modify
+    //       the keybinds below to reflect the change
+    pub const TAG_CAP: usize = 9;
     // how much of the monitor width the main client occupies in the main-stack layout
     pub const MAIN_CLIENT_WIDTH_PERCENTAGE: f32 = 0.55;
     // how much the main client's width is adjusted when resizing with keybinds
@@ -116,26 +120,26 @@ pub mod commands {
             WKeybind::new(MOD | SHIFT, ks::KEY_space,  WKeyCommand::UnFloat),
             WKeybind::new(MOD,         ks::KEY_F11,    WKeyCommand::Fullscreen),
             WKeybind::new(MOD,         ks::KEY_q,      WKeyCommand::Exit),
-            // BEGIN: workspace keybinds
-            WKeybind::new(MOD,         ks::KEY_1,      WKeyCommand::SelectWorkspace(0)),
-            WKeybind::new(MOD,         ks::KEY_2,      WKeyCommand::SelectWorkspace(1)),
-            WKeybind::new(MOD,         ks::KEY_3,      WKeyCommand::SelectWorkspace(2)),
-            WKeybind::new(MOD,         ks::KEY_4,      WKeyCommand::SelectWorkspace(3)),
-            WKeybind::new(MOD,         ks::KEY_5,      WKeyCommand::SelectWorkspace(4)),
-            WKeybind::new(MOD,         ks::KEY_6,      WKeyCommand::SelectWorkspace(5)),
-            WKeybind::new(MOD,         ks::KEY_7,      WKeyCommand::SelectWorkspace(6)),
-            WKeybind::new(MOD,         ks::KEY_8,      WKeyCommand::SelectWorkspace(7)),
-            WKeybind::new(MOD,         ks::KEY_9,      WKeyCommand::SelectWorkspace(8)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_1,      WKeyCommand::MoveClientToWorkspace(0)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_2,      WKeyCommand::MoveClientToWorkspace(1)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_3,      WKeyCommand::MoveClientToWorkspace(2)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_4,      WKeyCommand::MoveClientToWorkspace(3)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_5,      WKeyCommand::MoveClientToWorkspace(4)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_6,      WKeyCommand::MoveClientToWorkspace(5)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_7,      WKeyCommand::MoveClientToWorkspace(6)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_8,      WKeyCommand::MoveClientToWorkspace(7)),
-            WKeybind::new(MOD | SHIFT, ks::KEY_9,      WKeyCommand::MoveClientToWorkspace(8)),
-            // END: workspace keybinds
+            // BEGIN: tag keybinds
+            WKeybind::new(MOD,         ks::KEY_1,      WKeyCommand::SelectTag(0)),
+            WKeybind::new(MOD,         ks::KEY_2,      WKeyCommand::SelectTag(1)),
+            WKeybind::new(MOD,         ks::KEY_3,      WKeyCommand::SelectTag(2)),
+            WKeybind::new(MOD,         ks::KEY_4,      WKeyCommand::SelectTag(3)),
+            WKeybind::new(MOD,         ks::KEY_5,      WKeyCommand::SelectTag(4)),
+            WKeybind::new(MOD,         ks::KEY_6,      WKeyCommand::SelectTag(5)),
+            WKeybind::new(MOD,         ks::KEY_7,      WKeyCommand::SelectTag(6)),
+            WKeybind::new(MOD,         ks::KEY_8,      WKeyCommand::SelectTag(7)),
+            WKeybind::new(MOD,         ks::KEY_9,      WKeyCommand::SelectTag(8)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_1,      WKeyCommand::MoveClientToTag(0)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_2,      WKeyCommand::MoveClientToTag(1)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_3,      WKeyCommand::MoveClientToTag(2)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_4,      WKeyCommand::MoveClientToTag(3)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_5,      WKeyCommand::MoveClientToTag(4)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_6,      WKeyCommand::MoveClientToTag(5)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_7,      WKeyCommand::MoveClientToTag(6)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_8,      WKeyCommand::MoveClientToTag(7)),
+            WKeybind::new(MOD | SHIFT, ks::KEY_9,      WKeyCommand::MoveClientToTag(8)),
+            // END: tag keybinds
         ]
     }
 }

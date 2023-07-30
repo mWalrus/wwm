@@ -15,8 +15,8 @@ use crate::command::WDirection;
 use crate::{
     client::WClientState,
     config::{
+        tags::{MAIN_CLIENT_WIDTH_PERCENTAGE, TAG_CAP},
         theme,
-        workspaces::{MAIN_CLIENT_WIDTH_PERCENTAGE, WORKSPACE_TAG_CAP},
     },
     layouts::WLayout,
 };
@@ -59,7 +59,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             bar_rect,
             theme::bar::PADDING,
             theme::bar::SECTION_PADDING,
-            WORKSPACE_TAG_CAP,
+            TAG_CAP,
             layout.to_string(),
             "",
             [
@@ -101,7 +101,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
     }
 
     pub fn set_tag(&mut self, new_tag: usize) -> Result<(), StateError> {
-        if new_tag > WORKSPACE_TAG_CAP - 1 {
+        if new_tag > TAG_CAP - 1 {
             return Err(StateError::Bounds(new_tag));
         }
         let clients = self.clients_in_tag(new_tag);
@@ -268,7 +268,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         if clients_in_current_tag.is_empty() {
             self.client = None;
         } else {
-            for t in 0..WORKSPACE_TAG_CAP {
+            for t in 0..TAG_CAP {
                 let tag_clients = self.clients_in_tag(t);
 
                 if tag_clients.is_empty() {

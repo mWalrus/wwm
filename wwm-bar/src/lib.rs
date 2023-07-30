@@ -41,12 +41,15 @@ pub struct WBar<'b, C: Connection> {
     tags: Vec<WBarTag>,
     layout_symbol: Text,
     title: Text,
-    section_dims: [WRect; 3],
+    layout_rect: WRect,
+    title_rect: WRect,
+    status_width: u16,
     section_padding: i16,
     colors: WBarColors,
     redraw_queue: Arc<Mutex<Vec<Redraw>>>,
     has_client_gc: Gcontext,
     has_client_gc_selected: Gcontext,
+    clear_gc: Gcontext,
     is_focused: bool,
     modules: Vec<WBarModule>,
     padding: u16,
@@ -118,6 +121,7 @@ impl<'b, C: Connection> WBar<'b, C> {
         .unwrap();
 
         let fg = colors[0];
+        let bg = colors[1];
         let fg_selected = colors[3];
 
         let colors = WBarColors {
@@ -129,6 +133,7 @@ impl<'b, C: Connection> WBar<'b, C> {
 
         let has_client_gc = conn.generate_id().unwrap();
         let has_client_gc_selected = conn.generate_id().unwrap();
+        let clear_gc = conn.generate_id().unwrap();
 
         conn.create_gc(
             has_client_gc,
@@ -145,6 +150,16 @@ impl<'b, C: Connection> WBar<'b, C> {
             bar_win,
             &CreateGCAux::new()
                 .foreground(fg_selected)
+                .line_width(1)
+                .line_style(LineStyle::SOLID),
+        )
+        .unwrap();
+
+        conn.create_gc(
+            clear_gc,
+            bar_win,
+            &CreateGCAux::new()
+                .foreground(bg)
                 .line_width(1)
                 .line_style(LineStyle::SOLID),
         )
@@ -190,22 +205,18 @@ impl<'b, C: Connection> WBar<'b, C> {
         );
         let title = Text::new(conn, &x11font, &vis_info, title, bar_win, padding, padding);
 
-        let section_dims = [
-            WRect::new(0, 0, x_offset as u16, rect.h),
-            WRect::new(
-                x_offset + section_padding as i16,
-                0,
-                layout_symbol.box_width,
-                rect.h,
-            ),
-            WRect::new(
-                x_offset + layout_symbol.box_width as i16 + section_padding,
-                0,
-                rect.w - (x_offset + layout_symbol.box_width as i16 + section_padding) as u16,
-                rect.h,
-            ),
-        ];
-
+        let layout_rect = WRect::new(
+            x_offset + section_padding as i16,
+            0,
+            layout_symbol.box_width,
+            rect.h,
+        );
+        let title_rect = WRect::new(
+            x_offset + layout_rect.w as i16 + section_padding,
+            0,
+            rect.w - (x_offset + layout_rect.w as i16 + section_padding) as u16,
+            rect.h,
+        );
         conn.map_window(bar_win).unwrap();
 
         let mut bar = Self {
@@ -217,7 +228,9 @@ impl<'b, C: Connection> WBar<'b, C> {
             font: x11font,
             layout_symbol,
             title,
-            section_dims,
+            layout_rect,
+            title_rect,
+            status_width: 0,
             section_padding,
             colors,
             redraw_queue: Arc::new(Mutex::new(vec![
@@ -236,6 +249,7 @@ impl<'b, C: Connection> WBar<'b, C> {
             ])),
             has_client_gc,
             has_client_gc_selected,
+            clear_gc,
             is_focused: false,
             modules: Self::init_modules(mod_mask),
             padding,
@@ -306,6 +320,7 @@ impl<'b, C: Connection> WBar<'b, C> {
             self.layout_symbol.horizontal_padding,
         );
         if let Ok(mut queue) = self.redraw_queue.lock() {
+            queue.push(Redraw::Title);
             queue.push(Redraw::LayoutSymbol);
         }
     }
@@ -322,12 +337,11 @@ impl<'b, C: Connection> WBar<'b, C> {
         );
 
         // FIXME: we need a cleaner solution for this
-        let left_rect = &self.section_dims[1];
-        let new_x = left_rect.x + left_rect.w as i16 + self.section_padding;
-        self.section_dims[2] = WRect::new(
+        let new_x = self.layout_rect.x + self.layout_rect.w as i16 + self.section_padding;
+        self.title_rect = WRect::new(
             new_x,
-            left_rect.y,
-            self.section_dims[2].w - self.section_padding as u16,
+            self.title_rect.y,
+            self.title_rect.w - self.section_padding as u16,
             self.rect.h,
         );
 
@@ -421,7 +435,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                     Redraw::LayoutSymbol => {
                         self.font
                             .draw(
-                                self.section_dims[1],
+                                self.layout_rect,
                                 &self.layout_symbol,
                                 self.picture,
                                 self.colors.bg,
@@ -432,7 +446,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                     Redraw::Title => {
                         self.font
                             .draw(
-                                self.section_dims[2],
+                                self.title_rect,
                                 &self.title,
                                 self.picture,
                                 self.colors.bg,
@@ -445,6 +459,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                         for module in self.modules.iter() {
                             strings.push(module.0.update());
                         }
+
                         let text = Text::new(
                             conn,
                             &self.font,
@@ -454,13 +469,28 @@ impl<'b, C: Connection> WBar<'b, C> {
                             self.padding,
                             self.padding,
                         );
-                        let rect = WRect::new(
-                            (self.rect.w - text.box_width) as i16,
+
+                        let mut rect = WRect::new(
+                            (self.rect.w - self.status_width) as i16,
                             0,
-                            text.box_width,
+                            self.status_width,
                             self.rect.h,
                         );
-                        self.section_dims[2].w = self.section_dims[2].x.abs_diff(rect.x);
+
+                        if text.box_width < self.status_width {
+                            // clear previous status section size
+                            // otherwise, if the current text size is smaller,
+                            // there will be remnants of the previous update's text
+                            // in the bar.
+                            conn.poly_fill_rectangle(self.window, self.clear_gc, &[rect.into()])
+                                .unwrap();
+                        }
+
+                        rect.x = (self.rect.w - text.box_width) as i16;
+                        rect.w = text.box_width;
+                        self.status_width = text.box_width;
+
+                        self.title_rect.w = self.title_rect.x.abs_diff(rect.x);
                         self.font
                             .draw(rect, &text, self.picture, self.colors.bg, self.colors.fg)
                             .unwrap();

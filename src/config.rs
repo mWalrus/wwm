@@ -42,6 +42,11 @@ pub mod theme {
     }
 }
 
+#[inline]
+pub const fn bar_height() -> u16 {
+    theme::bar::FONT_SIZE as u16 + (theme::bar::PADDING * 2)
+}
+
 pub mod workspaces {
     // amount of workspace tags per monitor
     pub const WORKSPACE_TAG_CAP: usize = 9;
@@ -70,10 +75,9 @@ pub mod mouse {
 }
 
 pub mod commands {
-    use crate::command::WKeyCommand;
+    use crate::command::{WDirection, WKeyCommand};
     use crate::keyboard::keybind::WKeybind;
     use crate::layouts::WLayout;
-    use crate::util::WDirection;
     use x11rb::protocol::xproto::ModMask;
     use xkbcommon::xkb::keysyms as ks;
 

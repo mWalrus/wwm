@@ -1,13 +1,13 @@
 [package]
-name = "wwm-bar"
+name = "wwm-core"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chrono = "0.4.24"
+fontdue = "0.7.2"
+smallmap = "1.4.1"
+thiserror = "1.0.39"
 x11rb = { version = "0.11.1", features = ["libc"] }
-lazy_static = "1.4.0"
-sysinfo = "0.29.6"
-wwm-core = { path = "../wwm-core" }
+font-loader = "0.11.0"

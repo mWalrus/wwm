@@ -2,11 +2,8 @@ use std::{cmp::Ordering, fmt};
 
 use x11rb::connection::Connection;
 
-use crate::{
-    config::theme::window::BORDER_WIDTH,
-    monitor::WMonitor,
-    util::{bar_height, WRect},
-};
+use crate::{config::bar_height, config::theme::window::BORDER_WIDTH, monitor::WMonitor};
+use wwm_core::util::WRect;
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum WLayout {

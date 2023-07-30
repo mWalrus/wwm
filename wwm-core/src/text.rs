@@ -4,25 +4,37 @@ use smallmap::Map;
 use thiserror::Error;
 use x11rb::{
     connection::Connection,
-    protocol::render::{ConnectionExt, Glyphinfo, Glyphset, Pictformat},
+    protocol::{
+        render::{
+            Color, ConnectionExt as _, CreatePictureAux, Glyphinfo, Glyphset, PictOp, Pictformat,
+            Picture, Repeat,
+        },
+        xproto::{ConnectionExt, Pixmap, Rectangle},
+    },
     rust_connection::{ConnectionError, ReplyOrIdError},
 };
+
+use crate::util::WRect;
+
+use crate::visual::RenderVisualInfo;
 
 #[derive(Error, Debug)]
 pub enum FontError {
     #[error("Failed to load font data: {0}")]
     LoadFromBytes(&'static str),
-    #[error("Failed to create glyphset: {0:?}")]
-    CreateGlyphset(#[from] ConnectionError),
+    #[error("Could not find font: {0}")]
+    NotFound(&'static str),
+    #[error("Connection error: {0:#?}")]
+    Connection(#[from] ConnectionError),
     #[error("Failed to create glyphset ID: {0:?}")]
     GSID(#[from] ReplyOrIdError),
 }
 
-pub struct X11Font {
+pub struct TextRenderer<'a, C: Connection> {
+    conn: &'a C,
     pub gsid: Glyphset,
-    pub char_map: Map<char, CharInfo>,
+    char_map: Map<char, CharInfo>,
     pub font_height: i16,
-    pub font: FontData,
 }
 
 pub struct CharInfo {
@@ -35,24 +47,24 @@ pub struct CharInfo {
 pub struct FontEncodedChunk {
     pub width: i16,
     pub font_height: i16,
-    pub glyph_set: Glyphset,
-    pub glyph_ids: Vec<u32>,
+    glyph_set: Glyphset,
+    glyph_ids: Vec<u32>,
 }
 
 type RasterizationData = Vec<(char, Metrics, Vec<u8>)>;
 type CharMapData = (Vec<u32>, Vec<Glyphinfo>, Vec<u8>, Map<char, CharInfo>);
 
-impl X11Font {
-    pub fn new<C: Connection>(
-        conn: &C,
+impl<'a, C: Connection> TextRenderer<'a, C> {
+    pub fn new(
+        conn: &'a C,
         pict_format: Pictformat,
-        family: &'static str,
+        font_family: &'static str,
         font_size: f32,
     ) -> Result<Self, FontError> {
         let gsid = conn.generate_id()?;
         conn.render_create_glyph_set(gsid, pict_format)?;
 
-        let font = Self::evaluate(family, font_size)?;
+        let font = Self::evaluate(font_family, font_size)?;
         let (data, font_height) = Self::rasterize(&font, font_size);
         let (ids, glyphs, raw_data, char_map) =
             Self::generate_char_map(conn, gsid, data, font_height)?;
@@ -60,19 +72,12 @@ impl X11Font {
         conn.render_add_glyphs(gsid, &ids, &glyphs, &raw_data)
             .unwrap();
 
-        Ok(X11Font {
+        Ok(TextRenderer {
+            conn,
             gsid,
             char_map,
             font_height,
-            font,
         })
-    }
-
-    fn current_out_size(ids: usize, infos: usize, raw_data: usize) -> usize {
-        core::mem::size_of::<u32>()
-            + core::mem::size_of::<u32>() * ids
-            + core::mem::size_of::<u32>() * infos
-            + core::mem::size_of::<u32>() * raw_data
     }
 
     fn rasterize(font: &FontData, size: f32) -> (RasterizationData, i16) {
@@ -108,11 +113,11 @@ impl X11Font {
             };
             FontData::from_bytes(font, settings).map_err(FontError::LoadFromBytes)
         } else {
-            Err(FontError::LoadFromBytes(family))
+            Err(FontError::NotFound(family))
         }
     }
 
-    fn generate_char_map<C: Connection>(
+    fn generate_char_map(
         conn: &C,
         glyphset_id: u32,
         data: RasterizationData,
@@ -122,6 +127,13 @@ impl X11Font {
         let mut glyphs = vec![];
         let mut raw_data = vec![];
         let mut char_map: Map<char, CharInfo> = Map::new();
+
+        fn current_out_size(ids: usize, infos: usize, raw_data: usize) -> usize {
+            core::mem::size_of::<u32>()
+                + core::mem::size_of::<u32>() * ids
+                + core::mem::size_of::<u32>() * infos
+                + core::mem::size_of::<u32>() * raw_data
+        }
 
         for (id, (c, metrics, bitmaps)) in data.into_iter().enumerate() {
             let id = id as u32;
@@ -150,7 +162,7 @@ impl X11Font {
                 },
             );
 
-            let current_out_size = Self::current_out_size(ids.len(), glyphs.len(), raw_data.len());
+            let current_out_size = current_out_size(ids.len(), glyphs.len(), raw_data.len());
             if current_out_size >= 32768 {
                 conn.render_add_glyphs(glyphset_id, &ids, &glyphs, &raw_data)?;
                 ids.clear();
@@ -172,8 +184,7 @@ impl X11Font {
                 }
             }
         }
-        let (w, h) = (width, height);
-        (w, h)
+        (width, height)
     }
 
     pub fn encode(&self, text: &str, max_width: i16) -> Vec<FontEncodedChunk> {
@@ -226,5 +237,127 @@ impl X11Font {
             })
         }
         chunks
+    }
+
+    pub fn draw(
+        &self,
+        rect: WRect,
+        text: &Text,
+        dst: Picture,
+        bg: Color,
+        fg: Color,
+    ) -> Result<(), FontError> {
+        let WRect { x, y, w, h } = rect;
+        let fg_fill_area: Rectangle = WRect::new(0, y, w, h).into();
+        let bg_fill_area: Rectangle = rect.into();
+
+        self.conn
+            .render_fill_rectangles(PictOp::SRC, text.picture, fg, &[fg_fill_area])?;
+        self.conn
+            .render_fill_rectangles(PictOp::SRC, dst, bg, &[bg_fill_area])?;
+
+        let mut x_offset = x + text.horizontal_padding as i16;
+        for chunk in &text.chunks {
+            self.draw_glyphs(
+                x_offset,
+                y,
+                chunk.glyph_set,
+                text.picture,
+                dst,
+                &chunk.glyph_ids,
+            )?;
+
+            x_offset += chunk.width;
+        }
+
+        Ok(())
+    }
+
+    fn draw_glyphs(
+        &self,
+        x: i16,
+        y: i16,
+        glyphs: Glyphset,
+        src: Picture,
+        dst: Picture,
+        glyph_ids: &[u32],
+    ) -> Result<(), FontError> {
+        let mut buf = Vec::with_capacity(glyph_ids.len());
+        let render = if glyph_ids.len() > 254 {
+            &glyph_ids[..254]
+        } else {
+            glyph_ids
+        };
+
+        buf.extend_from_slice(&[render.len() as u8, 0, 0, 0]);
+
+        buf.extend_from_slice(&(x).to_ne_bytes());
+        buf.extend_from_slice(&(y).to_ne_bytes());
+
+        for glyph in render {
+            buf.extend_from_slice(&(glyph).to_ne_bytes());
+        }
+
+        self.conn
+            .render_composite_glyphs16(PictOp::OVER, src, dst, 0, glyphs, 0, 0, &buf)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Text {
+    pub chunks: Vec<FontEncodedChunk>,
+    pub picture: Picture,
+    pub pixmap: Pixmap,
+    pub text_width: i16,
+    pub text_height: u16,
+    pub box_width: u16,
+    pub box_height: u16,
+    pub vertical_padding: u16,
+    pub horizontal_padding: u16,
+}
+
+impl Text {
+    pub fn new<C: Connection>(
+        conn: &C,
+        font: &TextRenderer<C>,
+        vis_info: &RenderVisualInfo,
+        text: impl ToString,
+        parent: u32,
+        vertical_padding: u16,
+        horizontal_padding: u16,
+    ) -> Self {
+        let text = text.to_string();
+        let (text_width, text_height) = font.geometry(&text);
+        let chunks = font.encode(&text, text_width - 1);
+
+        let box_width = text_width as u16 + (horizontal_padding * 2);
+        let box_height = text_height as u16 + (vertical_padding * 2);
+
+        let picture = conn.generate_id().unwrap();
+        let pixmap = conn.generate_id().unwrap();
+
+        conn.create_pixmap(vis_info.root.depth, pixmap, parent, box_width, box_height)
+            .unwrap();
+
+        conn.render_create_picture(
+            picture,
+            pixmap,
+            vis_info.root.pict_format,
+            &CreatePictureAux::new().repeat(Repeat::NORMAL),
+        )
+        .unwrap();
+
+        Self {
+            chunks,
+            text_width,
+            text_height,
+            picture,
+            pixmap,
+            box_width,
+            box_height,
+            vertical_padding,
+            horizontal_padding,
+        }
     }
 }

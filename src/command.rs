@@ -1,4 +1,10 @@
-use crate::{layouts::WLayout, util::WDirection};
+use crate::layouts::WLayout;
+
+#[derive(Debug, Clone, Copy)]
+pub enum WDirection {
+    Prev,
+    Next,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum WKeyCommand {

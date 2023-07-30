@@ -5,10 +5,12 @@ use std::{
     time::Duration,
 };
 
-use font::{FontDrawer, RenderString};
 use status_module::{WBarModMask, WBarModule};
-use util::{hex_to_rgba_color, Rect};
-use visual::RenderVisualInfo;
+use wwm_core::{
+    text::{Text, TextRenderer},
+    util::{hex_to_rgba_color, WRect},
+    visual::RenderVisualInfo,
+};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -20,10 +22,7 @@ use x11rb::{
     },
 };
 
-pub mod font;
 pub mod status_module;
-mod util;
-pub mod visual;
 
 #[derive(Debug)]
 enum Redraw {
@@ -33,16 +32,16 @@ enum Redraw {
     Modules,
 }
 
-pub struct WBar {
+pub struct WBar<'b, C: Connection> {
     window: Window,
     picture: Picture,
-    rect: Rect,
-    font_drawer: Rc<FontDrawer>,
+    rect: WRect,
+    font: Rc<TextRenderer<'b, C>>,
     vis_info: Rc<RenderVisualInfo>,
     tags: Vec<WBarTag>,
-    layout_symbol: RenderString,
-    title: RenderString,
-    section_dims: [Rect; 3],
+    layout_symbol: Text,
+    title: Text,
+    section_dims: [WRect; 3],
     section_padding: i16,
     colors: WBarColors,
     redraw_queue: Arc<Mutex<Vec<Redraw>>>,
@@ -63,14 +62,14 @@ struct WBarColors {
 #[derive(Debug)]
 pub struct WBarTag {
     id: usize,
-    text: RenderString,
-    rect: Rect,
+    text: Text,
+    rect: WRect,
     selected: bool,
     has_clients: bool,
 }
 
 impl WBarTag {
-    fn new(id: usize, text: RenderString, rect: Rect, selected: bool, has_clients: bool) -> Self {
+    fn new(id: usize, text: Text, rect: WRect, selected: bool, has_clients: bool) -> Self {
         Self {
             id,
             text,
@@ -81,12 +80,12 @@ impl WBarTag {
     }
 }
 
-impl WBar {
-    pub fn new<C: Connection>(
+impl<'b, C: Connection> WBar<'b, C> {
+    pub fn new(
         conn: &C,
-        font_drawer: Rc<FontDrawer>,
+        x11font: Rc<TextRenderer<'b, C>>,
         vis_info: Rc<RenderVisualInfo>,
-        rect: impl Into<Rect>,
+        rect: impl Into<WRect>,
         padding: u16,
         section_padding: i16,
         taglen: usize,
@@ -154,9 +153,9 @@ impl WBar {
         let mut tags = Vec::with_capacity(taglen);
         let mut x_offset = 0;
         for i in 0..taglen {
-            let text = RenderString::new(
+            let text = Text::new(
                 conn,
-                &font_drawer,
+                &x11font,
                 &vis_info,
                 i + 1,
                 bar_win,
@@ -164,7 +163,7 @@ impl WBar {
                 padding * 2,
             );
 
-            let tag_rect = Rect::new(x_offset, rect.y, text.box_width as u16, rect.h);
+            let tag_rect = WRect::new(x_offset, rect.y, text.box_width as u16, rect.h);
             x_offset += text.box_width as i16;
 
             tags.push(WBarTag::new(i, text, tag_rect, i == 0, false));
@@ -180,34 +179,26 @@ impl WBar {
                 .polymode(PolyMode::IMPRECISE),
         )
         .unwrap();
-        let layout_symbol = RenderString::new(
+        let layout_symbol = Text::new(
             conn,
-            &font_drawer,
+            &x11font,
             &vis_info,
             layout_symbol,
             bar_win,
             padding,
             padding,
         );
-        let title = RenderString::new(
-            conn,
-            &font_drawer,
-            &vis_info,
-            title,
-            bar_win,
-            padding,
-            padding,
-        );
+        let title = Text::new(conn, &x11font, &vis_info, title, bar_win, padding, padding);
 
         let section_dims = [
-            Rect::new(0, 0, x_offset as u16, rect.h),
-            Rect::new(
+            WRect::new(0, 0, x_offset as u16, rect.h),
+            WRect::new(
                 x_offset + section_padding as i16,
                 0,
                 layout_symbol.box_width,
                 rect.h,
             ),
-            Rect::new(
+            WRect::new(
                 x_offset + layout_symbol.box_width as i16 + section_padding,
                 0,
                 rect.w - (x_offset + layout_symbol.box_width as i16 + section_padding) as u16,
@@ -223,7 +214,7 @@ impl WBar {
             rect,
             tags,
             vis_info,
-            font_drawer,
+            font: x11font,
             layout_symbol,
             title,
             section_dims,
@@ -304,10 +295,10 @@ impl WBar {
         tag_idx
     }
 
-    pub fn update_layout_symbol<C: Connection>(&mut self, conn: &C, layout_symbol: impl ToString) {
-        self.layout_symbol = RenderString::new(
+    pub fn update_layout_symbol(&mut self, conn: &C, layout_symbol: impl ToString) {
+        self.layout_symbol = Text::new(
             conn,
-            &self.font_drawer,
+            &self.font,
             &self.vis_info,
             layout_symbol,
             self.window,
@@ -319,10 +310,10 @@ impl WBar {
         }
     }
 
-    pub fn update_title<C: Connection>(&mut self, conn: &C, title: impl ToString) {
-        self.title = RenderString::new(
+    pub fn update_title(&mut self, conn: &C, title: impl ToString) {
+        self.title = Text::new(
             conn,
-            &self.font_drawer,
+            &self.font,
             &self.vis_info,
             title,
             self.window,
@@ -333,7 +324,7 @@ impl WBar {
         // FIXME: we need a cleaner solution for this
         let left_rect = &self.section_dims[1];
         let new_x = left_rect.x + left_rect.w as i16 + self.section_padding;
-        self.section_dims[2] = Rect::new(
+        self.section_dims[2] = WRect::new(
             new_x,
             left_rect.y,
             self.section_dims[2].w - self.section_padding as u16,
@@ -380,7 +371,7 @@ impl WBar {
         }
     }
 
-    pub fn draw<C: Connection>(&mut self, conn: &C) {
+    pub fn draw(&mut self, conn: &C) {
         if let Ok(mut queue) = self.redraw_queue.lock() {
             if queue.is_empty() {
                 return;
@@ -395,14 +386,14 @@ impl WBar {
                         } else {
                             (self.colors.fg, self.colors.bg)
                         };
-                        self.font_drawer
-                            .draw(conn, tag.rect, &tag.text, self.picture, bg, fg)
+                        self.font
+                            .draw(tag.rect, &tag.text, self.picture, bg, fg)
                             .unwrap();
 
                         let client_rect: Rectangle =
-                            Rect::new(tag.rect.x + 1, tag.rect.y + 1, 3, 3).into();
+                            WRect::new(tag.rect.x + 1, tag.rect.y + 1, 3, 3).into();
                         let client_rect_fill: Rectangle =
-                            Rect::new(tag.rect.x + 1, tag.rect.y + 1, 4, 4).into();
+                            WRect::new(tag.rect.x + 1, tag.rect.y + 1, 4, 4).into();
 
                         if !tag.has_clients {
                             continue;
@@ -428,9 +419,8 @@ impl WBar {
                         }
                     }
                     Redraw::LayoutSymbol => {
-                        self.font_drawer
+                        self.font
                             .draw(
-                                conn,
                                 self.section_dims[1],
                                 &self.layout_symbol,
                                 self.picture,
@@ -440,9 +430,8 @@ impl WBar {
                             .unwrap();
                     }
                     Redraw::Title => {
-                        self.font_drawer
+                        self.font
                             .draw(
-                                conn,
                                 self.section_dims[2],
                                 &self.title,
                                 self.picture,
@@ -456,31 +445,24 @@ impl WBar {
                         for module in self.modules.iter() {
                             strings.push(module.0.update());
                         }
-                        let text = RenderString::new(
+                        let text = Text::new(
                             conn,
-                            &self.font_drawer,
+                            &self.font,
                             &self.vis_info,
                             strings.join(" | "),
                             self.window,
                             self.padding,
                             self.padding,
                         );
-                        let rect = Rect::new(
+                        let rect = WRect::new(
                             (self.rect.w - text.box_width) as i16,
                             0,
                             text.box_width,
                             self.rect.h,
                         );
                         self.section_dims[2].w = self.section_dims[2].x.abs_diff(rect.x);
-                        self.font_drawer
-                            .draw(
-                                conn,
-                                rect,
-                                &text,
-                                self.picture,
-                                self.colors.bg,
-                                self.colors.fg,
-                            )
+                        self.font
+                            .draw(rect, &text, self.picture, self.colors.bg, self.colors.fg)
                             .unwrap();
                     }
                 }

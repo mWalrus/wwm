@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
-use wwm_bar::{font::FontDrawer, visual::RenderVisualInfo, WBar};
+use wwm_bar::WBar;
+use wwm_core::{text::TextRenderer, visual::RenderVisualInfo};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -10,6 +11,7 @@ use x11rb::{
     xcb_ffi::ReplyOrIdError,
 };
 
+use crate::command::WDirection;
 use crate::{
     client::WClientState,
     config::{
@@ -17,12 +19,12 @@ use crate::{
         workspaces::{MAIN_CLIENT_WIDTH_PERCENTAGE, WORKSPACE_TAG_CAP},
     },
     layouts::WLayout,
-    util::{StateError, WDirection, WPos, WRect},
 };
+use wwm_core::util::{StateError, WPos, WRect};
 
 pub struct WMonitor<'a, C: Connection> {
     pub conn: &'a C,
-    pub bar: WBar,
+    pub bar: WBar<'a, C>,
     pub primary: bool,
     pub rect: WRect,
     pub clients: Vec<WClientState>,
@@ -36,7 +38,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
     pub fn new(
         mi: &MonitorInfo,
         conn: &'a C,
-        font_drawer: Rc<FontDrawer>,
+        font_drawer: Rc<TextRenderer<'a, C>>,
         vis_info: Rc<RenderVisualInfo>,
     ) -> Self {
         let layout = WLayout::MainStack;

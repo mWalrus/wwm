@@ -1,8 +1,7 @@
-use crate::config;
-
 use thiserror::Error;
-use x11rb::protocol::xproto::{
-    ConfigWindow, ConfigureWindowAux, GetGeometryReply, MotionNotifyEvent,
+use x11rb::protocol::{
+    render::Color,
+    xproto::{ConfigWindow, ConfigureWindowAux, GetGeometryReply, MotionNotifyEvent, Rectangle},
 };
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -34,6 +33,23 @@ impl From<WRect> for ConfigureWindowAux {
     }
 }
 
+impl From<WRect> for Rectangle {
+    fn from(r: WRect) -> Self {
+        Self {
+            x: r.x,
+            y: r.y,
+            width: r.w,
+            height: r.h,
+        }
+    }
+}
+
+impl From<Rectangle> for WRect {
+    fn from(r: Rectangle) -> Self {
+        Self::new(r.x, r.y, r.width, r.height)
+    }
+}
+
 impl WRect {
     pub fn new(x: i16, y: i16, width: u16, height: u16) -> Self {
         Self {
@@ -42,6 +58,12 @@ impl WRect {
             w: width,
             h: height,
         }
+    }
+
+    pub fn has_pointer(&self, px: i16, py: i16) -> bool {
+        let has_x = px >= self.x && px <= self.x + self.w as i16;
+        let has_y = py >= self.y && py <= self.y + self.h as i16;
+        has_x && has_y
     }
 }
 
@@ -91,12 +113,6 @@ impl WPos {
     pub fn new(x: i16, y: i16) -> Self {
         Self { x, y }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum WDirection {
-    Prev,
-    Next,
 }
 
 #[derive(Error, Debug)]
@@ -149,7 +165,15 @@ pub fn cmd_bits(cmd: &'static [&'static str]) -> Option<(&'static str, &'static 
     Some((cmd[0], args))
 }
 
-#[inline]
-pub const fn bar_height() -> u16 {
-    config::theme::bar::FONT_SIZE as u16 + (config::theme::bar::PADDING * 2)
+pub fn hex_to_rgba_color(hex: u32) -> Color {
+    let red = ((hex >> 16 & 0xff) as u16) << 8;
+    let green = ((hex >> 8 & 0xff) as u16) << 8;
+    let blue = ((hex & 0xff) as u16) << 8;
+
+    Color {
+        red,
+        green,
+        blue,
+        alpha: 0xffff,
+    }
 }

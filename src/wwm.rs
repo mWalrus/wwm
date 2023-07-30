@@ -1,8 +1,9 @@
 use crate::{
     client::WClientState,
-    command::{WKeyCommand, WMouseCommand},
+    command::{WDirection, WKeyCommand, WMouseCommand},
     config::{
         auto_start::AUTO_START_COMMANDS,
+        bar_height,
         mouse::{DRAG_BUTTON, RESIZE_BUTTON},
         theme::{self, window::BORDER_WIDTH},
         workspaces::WIDTH_ADJUSTMENT_FACTOR,
@@ -11,9 +12,10 @@ use crate::{
     layouts::{layout_clients, WLayout},
     monitor::WMonitor,
     mouse::WMouse,
-    util::{self, WConfigWindow, WDirection, WPos, WRect},
     AtomCollection,
 };
+use wwm_core::util::{WConfigWindow, WPos, WRect};
+
 use std::{
     collections::HashSet,
     process::{exit, Command},
@@ -23,10 +25,7 @@ use std::{
     thread,
     time::Duration,
 };
-use wwm_bar::{
-    font::{loader::X11Font, FontDrawer},
-    visual::RenderVisualInfo,
-};
+use wwm_core::{text::TextRenderer, visual::RenderVisualInfo};
 use x11rb::{
     connection::Connection,
     properties::WmSizeHints,
@@ -63,7 +62,7 @@ pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
     #[allow(dead_code)]
-    font_drawer: Rc<FontDrawer>,
+    font_drawer: Rc<TextRenderer<'a, C>>,
     monitors: Vec<WMonitor<'a, C>>,
     selmon: usize,
     pending_exposure: HashSet<Window>,
@@ -99,14 +98,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::run_auto_start_commands().unwrap();
 
         let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
-        let font = X11Font::new(
+        let font = TextRenderer::new(
             conn,
             vis_info.render.pict_format,
             theme::bar::FONT,
             theme::bar::FONT_SIZE,
         )
         .unwrap();
-        let font_drawer = Rc::new(FontDrawer::new(font));
+        let font_drawer = Rc::new(font);
 
         let mut monitors: Vec<WMonitor<'a, C>> =
             Self::get_monitors(conn, screen, &font_drawer, &vis_info)?.into();
@@ -347,7 +346,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn get_monitors(
         conn: &'a C,
         screen: &Screen,
-        font_drawer: &Rc<FontDrawer>,
+        font_drawer: &Rc<TextRenderer<'a, C>>,
         vis_info: &Rc<RenderVisualInfo>,
     ) -> Result<Vec<WMonitor<'a, C>>, ReplyError> {
         let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
@@ -485,7 +484,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 y = mon_rect.y;
             }
         }
-        let bh = util::bar_height();
+        let bh = bar_height();
         if h < bh {
             h = bh;
         }
@@ -762,7 +761,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 c.old_bw = c.bw;
                 c.bw = 0;
                 c.is_floating = true;
-                let bh = util::bar_height();
+                let bh = bar_height();
                 self.resize_client(
                     idx,
                     mon_idx,
@@ -1223,7 +1222,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn run_auto_start_commands() -> Result<(), std::io::Error> {
         for cmd in AUTO_START_COMMANDS {
-            if let Some((bin, args)) = util::cmd_bits(cmd) {
+            if let Some((bin, args)) = wwm_core::util::cmd_bits(cmd) {
                 Command::new(bin).args(args).spawn()?;
             }
         }
@@ -1309,7 +1308,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn spawn_program(&self, cmd: &'static [&'static str]) {
-        if let Some((bin, args)) = util::cmd_bits(cmd) {
+        if let Some((bin, args)) = wwm_core::util::cmd_bits(cmd) {
             Command::new(bin).args(args).spawn().unwrap();
         }
     }

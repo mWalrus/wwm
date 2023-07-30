@@ -2,11 +2,9 @@
 A simple non-reparenting dynamic window manager for X.
 
 ## Screenshots
-__Tiling layout__:
 ![tiling layout](./screenshots/screenshot-1.png)
-
-__Column layout__:
 ![column layout](./screenshots/screenshot-2.png)
+![floating window](./screenshots/screenshot-3.png)
 
 ## Requirements
 - [fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/) to be able to discover installed fonts

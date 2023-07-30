@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
 use lazy_static::lazy_static;
 use std::{
     process::{Command, Stdio},
@@ -139,7 +139,7 @@ pub struct WBarDate(&'static str);
 
 impl WBarModuleTrait for WBarDate {
     fn update(&self) -> String {
-        let now: DateTime<Utc> = SystemTime::now().into();
+        let now: DateTime<Local> = SystemTime::now().into();
         now.date_naive().format(self.0).to_string()
     }
 }
@@ -148,7 +148,7 @@ pub struct WBarTime(&'static str);
 
 impl WBarModuleTrait for WBarTime {
     fn update(&self) -> String {
-        let now: DateTime<Utc> = SystemTime::now().into();
+        let now: DateTime<Local> = SystemTime::now().into();
         now.format(self.0).to_string()
     }
 }

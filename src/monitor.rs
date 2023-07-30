@@ -38,7 +38,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
     pub fn new(
         mi: &MonitorInfo,
         conn: &'a C,
-        font_drawer: Rc<TextRenderer<'a, C>>,
+        text_renderer: Rc<TextRenderer<'a, C>>,
         vis_info: Rc<RenderVisualInfo>,
     ) -> Self {
         let layout = WLayout::MainStack;
@@ -54,7 +54,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         let height = mi.height - bar_rect.height;
         let bar = WBar::new(
             conn,
-            font_drawer,
+            text_renderer,
             vis_info,
             bar_rect,
             theme::bar::PADDING,

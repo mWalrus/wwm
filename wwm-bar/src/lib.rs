@@ -36,7 +36,7 @@ pub struct WBar<'b, C: Connection> {
     window: Window,
     picture: Picture,
     rect: WRect,
-    font: Rc<TextRenderer<'b, C>>,
+    text_renderer: Rc<TextRenderer<'b, C>>,
     vis_info: Rc<RenderVisualInfo>,
     tags: Vec<WBarTag>,
     layout_symbol: Text,
@@ -86,7 +86,7 @@ impl WBarTag {
 impl<'b, C: Connection> WBar<'b, C> {
     pub fn new(
         conn: &C,
-        x11font: Rc<TextRenderer<'b, C>>,
+        text_renderer: Rc<TextRenderer<'b, C>>,
         vis_info: Rc<RenderVisualInfo>,
         rect: impl Into<WRect>,
         padding: u16,
@@ -170,7 +170,7 @@ impl<'b, C: Connection> WBar<'b, C> {
         for i in 0..taglen {
             let text = Text::new(
                 conn,
-                &x11font,
+                &text_renderer,
                 &vis_info,
                 i + 1,
                 bar_win,
@@ -196,14 +196,22 @@ impl<'b, C: Connection> WBar<'b, C> {
         .unwrap();
         let layout_symbol = Text::new(
             conn,
-            &x11font,
+            &text_renderer,
             &vis_info,
             layout_symbol,
             bar_win,
             padding,
             padding,
         );
-        let title = Text::new(conn, &x11font, &vis_info, title, bar_win, padding, padding);
+        let title = Text::new(
+            conn,
+            &text_renderer,
+            &vis_info,
+            title,
+            bar_win,
+            padding,
+            padding,
+        );
 
         let layout_rect = WRect::new(
             x_offset + section_padding as i16,
@@ -225,7 +233,7 @@ impl<'b, C: Connection> WBar<'b, C> {
             rect,
             tags,
             vis_info,
-            font: x11font,
+            text_renderer,
             layout_symbol,
             title,
             layout_rect,
@@ -312,7 +320,7 @@ impl<'b, C: Connection> WBar<'b, C> {
     pub fn update_layout_symbol(&mut self, conn: &C, layout_symbol: impl ToString) {
         self.layout_symbol = Text::new(
             conn,
-            &self.font,
+            &self.text_renderer,
             &self.vis_info,
             layout_symbol,
             self.window,
@@ -328,7 +336,7 @@ impl<'b, C: Connection> WBar<'b, C> {
     pub fn update_title(&mut self, conn: &C, title: impl ToString) {
         self.title = Text::new(
             conn,
-            &self.font,
+            &self.text_renderer,
             &self.vis_info,
             title,
             self.window,
@@ -400,7 +408,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                         } else {
                             (self.colors.fg, self.colors.bg)
                         };
-                        self.font
+                        self.text_renderer
                             .draw(tag.rect, &tag.text, self.picture, bg, fg)
                             .unwrap();
 
@@ -433,7 +441,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                         }
                     }
                     Redraw::LayoutSymbol => {
-                        self.font
+                        self.text_renderer
                             .draw(
                                 self.layout_rect,
                                 &self.layout_symbol,
@@ -444,7 +452,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                             .unwrap();
                     }
                     Redraw::Title => {
-                        self.font
+                        self.text_renderer
                             .draw(
                                 self.title_rect,
                                 &self.title,
@@ -462,7 +470,7 @@ impl<'b, C: Connection> WBar<'b, C> {
 
                         let text = Text::new(
                             conn,
-                            &self.font,
+                            &self.text_renderer,
                             &self.vis_info,
                             strings.join(" | "),
                             self.window,
@@ -491,7 +499,7 @@ impl<'b, C: Connection> WBar<'b, C> {
                         self.status_width = text.box_width;
 
                         self.title_rect.w = self.title_rect.x.abs_diff(rect.x);
-                        self.font
+                        self.text_renderer
                             .draw(rect, &text, self.picture, self.colors.bg, self.colors.fg)
                             .unwrap();
                     }

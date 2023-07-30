@@ -62,7 +62,7 @@ pub struct WinMan<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
     #[allow(dead_code)]
-    font_drawer: Rc<TextRenderer<'a, C>>,
+    text_renderer: Rc<TextRenderer<'a, C>>,
     monitors: Vec<WMonitor<'a, C>>,
     selmon: usize,
     pending_exposure: HashSet<Window>,
@@ -98,17 +98,17 @@ impl<'a, C: Connection> WinMan<'a, C> {
         Self::run_auto_start_commands().unwrap();
 
         let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
-        let font = TextRenderer::new(
+        let text_renderer = TextRenderer::new(
             conn,
             vis_info.render.pict_format,
             theme::bar::FONT,
             theme::bar::FONT_SIZE,
         )
         .unwrap();
-        let font_drawer = Rc::new(font);
+        let text_renderer = Rc::new(text_renderer);
 
         let mut monitors: Vec<WMonitor<'a, C>> =
-            Self::get_monitors(conn, screen, &font_drawer, &vis_info)?.into();
+            Self::get_monitors(conn, screen, &text_renderer, &vis_info)?.into();
 
         let selmon = monitors.iter().position(|m| m.primary).unwrap_or(0);
         monitors[selmon].bar.set_is_focused(true);
@@ -116,7 +116,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let mut wwm = Self {
             conn,
             screen,
-            font_drawer,
+            text_renderer,
             monitors,
             selmon,
             pending_exposure: Default::default(),
@@ -346,14 +346,14 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn get_monitors(
         conn: &'a C,
         screen: &Screen,
-        font_drawer: &Rc<TextRenderer<'a, C>>,
+        text_renderer: &Rc<TextRenderer<'a, C>>,
         vis_info: &Rc<RenderVisualInfo>,
     ) -> Result<Vec<WMonitor<'a, C>>, ReplyError> {
         let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
         let monitors: Vec<WMonitor<C>> = monitors
             .monitors
             .iter()
-            .map(|m| WMonitor::new(m, conn, Rc::clone(font_drawer), Rc::clone(vis_info)))
+            .map(|m| WMonitor::new(m, conn, Rc::clone(text_renderer), Rc::clone(vis_info)))
             .collect();
         Ok(monitors)
     }
@@ -1263,8 +1263,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         let title = if let Some(WClientState { window, .. }) =
             self.monitors[self.selmon].selected_client()
         {
-            let win = *window;
-            self.get_window_title(win)?
+            self.get_window_title(*window)?
         } else {
             String::new()
         };

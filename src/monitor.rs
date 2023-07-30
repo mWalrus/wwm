@@ -303,11 +303,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
                 }
 
                 if t == self.tag {
-                    if c.next == Some(first_idx) {
-                        self.client = Some(last_idx);
-                    } else if c.prev == Some(last_idx) {
-                        self.client = Some(first_idx);
-                    }
+                    self.client = Some(self.client.unwrap().min(last_idx));
                 }
             }
         }

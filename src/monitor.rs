@@ -114,20 +114,6 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         Ok(())
     }
 
-    pub fn selected_client(&self) -> Option<&WClientState> {
-        if let Some(i) = self.client {
-            return Some(&self.clients[i]);
-        }
-        None
-    }
-
-    pub fn selected_client_mut(&mut self) -> Option<&mut WClientState> {
-        if let Some(i) = self.client {
-            return Some(&mut self.clients[i]);
-        }
-        None
-    }
-
     pub fn select_adjacent(&mut self, dir: WDirection) {
         if let Some(i) = self.client {
             match dir {

@@ -179,50 +179,22 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             };
 
             let adj_idx = adj_idx.unwrap();
-
-            let cnext = self.clients[ci].next;
-            let cprev = self.clients[ci].prev;
-
-            self.clients[ci].prev = self.clients[adj_idx].prev;
-            self.clients[ci].next = self.clients[adj_idx].next;
-
-            self.clients[adj_idx].prev = cprev;
-            self.clients[adj_idx].next = cnext;
-
             self.clients.swap(adj_idx, ci);
+            self.relink_clients_in_tag(self.tag);
             self.client = Some(adj_idx);
         }
     }
 
     pub fn client_to_tag(&mut self, conn: &C, tag: usize) -> Result<(), ReplyOrIdError> {
         if let Some(curr_idx) = self.client {
-            let clients_in_current_tag = self.clients_in_tag(self.tag);
-            let (cp, cn) = {
-                let curr = &self.clients[curr_idx];
-                (curr.prev, curr.next)
-            };
-            for i in clients_in_current_tag.iter() {
-                let c = &mut self.clients[*i];
-                if c.next == Some(curr_idx) {
-                    c.next = cn;
-                }
-                if c.prev == Some(curr_idx) {
-                    c.prev = cp;
-                }
-            }
-            let clients_in_other_tag = self.clients_in_tag(tag);
-
-            if !clients_in_other_tag.is_empty() {
-                if let Some(last_idx) = clients_in_other_tag.last() {
-                    self.clients[*last_idx].next = Some(clients_in_other_tag.len());
-                    self.clients[curr_idx].prev = Some(*last_idx);
-                }
-                if let Some(first_idx) = clients_in_other_tag.first() {
-                    let c = &mut self.clients[*first_idx];
-                    c.prev = Some(clients_in_other_tag.len());
-                }
-            }
             self.clients[curr_idx].tag = tag;
+            self.relink_clients_in_tag(self.tag);
+            self.relink_clients_in_tag(tag);
+
+            self.bar
+                .set_has_clients(self.tag, !self.clients_in_tag(self.tag).is_empty());
+            self.bar.set_has_clients(tag, true);
+
             self.hide_clients(conn, tag)?;
         }
         Ok(())
@@ -248,6 +220,45 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         self.client = Some(self.clients.len() - 1);
     }
 
+    fn relink_clients_in_tag(&mut self, tag: usize) {
+        let tag_clients = self.clients_in_tag(tag);
+
+        if tag_clients.is_empty() {
+            return;
+        }
+
+        if tag_clients.len() == 1 {
+            self.clients[tag_clients[0]].prev = None;
+            self.clients[tag_clients[0]].next = None;
+            self.client = if tag == self.tag { Some(0) } else { None };
+            return;
+        }
+
+        let first_idx = *tag_clients.first().unwrap();
+        let last_idx = *tag_clients.last().unwrap();
+
+        for (i, client_idx) in tag_clients.iter().enumerate() {
+            let prev = if *client_idx == first_idx {
+                last_idx
+            } else {
+                tag_clients[i - 1]
+            };
+
+            let next = if *client_idx == last_idx {
+                first_idx
+            } else {
+                tag_clients[i + 1]
+            };
+
+            self.clients[*client_idx].prev = Some(prev);
+            self.clients[*client_idx].next = Some(next);
+        }
+
+        if tag == self.tag {
+            self.client = Some(self.client.unwrap().min(last_idx));
+        }
+    }
+
     pub fn remove_client(&mut self, idx: usize) -> WClientState {
         let c = self.clients.remove(idx);
         let clients_in_current_tag = self.clients_in_tag(self.tag);
@@ -255,42 +266,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
             self.client = None;
         } else {
             for t in 0..TAG_CAP {
-                let tag_clients = self.clients_in_tag(t);
-
-                if tag_clients.is_empty() {
-                    continue;
-                }
-
-                if tag_clients.len() == 1 {
-                    self.clients[tag_clients[0]].prev = None;
-                    self.clients[tag_clients[0]].next = None;
-                    self.client = if t == self.tag { Some(0) } else { None };
-                    continue;
-                }
-
-                let first_idx = *tag_clients.first().unwrap();
-                let last_idx = *tag_clients.last().unwrap();
-
-                for (i, client_idx) in tag_clients.iter().enumerate() {
-                    let prev = if *client_idx == first_idx {
-                        last_idx
-                    } else {
-                        tag_clients[i - 1]
-                    };
-
-                    let next = if *client_idx == last_idx {
-                        first_idx
-                    } else {
-                        tag_clients[i + 1]
-                    };
-
-                    self.clients[*client_idx].prev = Some(prev);
-                    self.clients[*client_idx].next = Some(next);
-                }
-
-                if t == self.tag {
-                    self.client = Some(self.client.unwrap().min(last_idx));
-                }
+                self.relink_clients_in_tag(t);
             }
         }
 

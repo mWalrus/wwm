@@ -58,7 +58,7 @@ impl<'a, C: Connection> WMonitor<'a, C> {
         );
 
         let bar_options = WBarOptions {
-            rect: WRect::from(bar_rect),
+            rect: bar_rect,
             padding: theme::bar::PADDING,
             section_padding: theme::bar::SECTION_PADDING,
             tag_count: TAG_CAP,

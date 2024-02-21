@@ -187,21 +187,6 @@ impl<'a, C: Connection> TextRenderer<'a, C> {
         })
     }
 
-    fn geometry(&self, text: impl ToString) -> (i16, u16) {
-        let text = text.to_string();
-        let mut width = 0;
-        let mut height = 0;
-        for c in text.chars() {
-            if let Some(lc) = self.char_map.get(&c) {
-                width += lc.horizontal_space;
-                if height < lc.height {
-                    height = lc.height;
-                }
-            }
-        }
-        (width, height)
-    }
-
     pub fn encode(&self, text: &str, max_width: i16) -> Vec<FontEncodedChunk> {
         let mut total_width = 0;
         let mut total_glyphs = 0;

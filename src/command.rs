@@ -1,4 +1,4 @@
-use crate::layouts::WLayout;
+use wwm_core::util::WLayout;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WDirection {

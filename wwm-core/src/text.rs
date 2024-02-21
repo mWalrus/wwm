@@ -6,15 +6,15 @@ use x11rb::{
     connection::Connection,
     protocol::{
         render::{
-            Color, ConnectionExt as _, CreatePictureAux, Glyphinfo, Glyphset, PictOp, Pictformat,
-            Picture, Repeat,
+            Color, ConnectionExt as _, CreatePictureAux, Glyphinfo, Glyphset, PictOp, Picture,
+            Repeat,
         },
-        xproto::{ConnectionExt, Pixmap, Rectangle},
+        xproto::{ConnectionExt, Rectangle, Screen, Window},
     },
     rust_connection::{ConnectionError, ReplyOrIdError},
 };
 
-use crate::util::WRect;
+use crate::{util::WRect, visual::VisualError};
 
 use crate::visual::RenderVisualInfo;
 
@@ -26,8 +26,10 @@ pub enum FontError {
     NotFound(&'static str),
     #[error("Connection error: {0:#?}")]
     Connection(#[from] ConnectionError),
-    #[error("Failed to create glyphset ID: {0:?}")]
-    GSID(#[from] ReplyOrIdError),
+    #[error("Reply or ID error: {0:?}")]
+    ReplyOrIdError(#[from] ReplyOrIdError),
+    #[error("Visual info error {0:?}")]
+    Visual(#[from] VisualError),
 }
 
 pub struct TextRenderer<'a, C: Connection> {
@@ -35,6 +37,7 @@ pub struct TextRenderer<'a, C: Connection> {
     pub gsid: Glyphset,
     char_map: Map<char, CharInfo>,
     pub font_height: i16,
+    pub visual_info: RenderVisualInfo,
 }
 
 pub struct CharInfo {
@@ -57,12 +60,13 @@ type CharMapData = (Vec<u32>, Vec<Glyphinfo>, Vec<u8>, Map<char, CharInfo>);
 impl<'a, C: Connection> TextRenderer<'a, C> {
     pub fn new(
         conn: &'a C,
-        pict_format: Pictformat,
+        screen: &Screen,
         font_family: &'static str,
         font_size: f32,
     ) -> Result<Self, FontError> {
+        let visual_info = RenderVisualInfo::new(conn, screen)?;
         let gsid = conn.generate_id()?;
-        conn.render_create_glyph_set(gsid, pict_format)?;
+        conn.render_create_glyph_set(gsid, visual_info.render.pict_format)?;
 
         let font = Self::evaluate(font_family, font_size)?;
         let (data, font_height) = Self::rasterize(&font, font_size);
@@ -77,6 +81,7 @@ impl<'a, C: Connection> TextRenderer<'a, C> {
             gsid,
             char_map,
             font_height,
+            visual_info,
         })
     }
 
@@ -173,7 +178,17 @@ impl<'a, C: Connection> TextRenderer<'a, C> {
         Ok((ids, glyphs, raw_data, char_map))
     }
 
-    pub fn geometry(&self, text: &str) -> (i16, u16) {
+    pub fn text_width(&self, text: impl ToString) -> u16 {
+        text.to_string().chars().fold(0u16, |acc, c| {
+            if let Some(c) = self.char_map.get(&c) {
+                return acc + c.horizontal_space as u16;
+            }
+            acc
+        })
+    }
+
+    fn geometry(&self, text: impl ToString) -> (i16, u16) {
+        let text = text.to_string();
         let mut width = 0;
         let mut height = 0;
         for c in text.chars() {
@@ -242,28 +257,57 @@ impl<'a, C: Connection> TextRenderer<'a, C> {
     pub fn draw(
         &self,
         rect: WRect,
-        text: &Text,
-        dst: Picture,
+        text: &str,
+        padding: u16,
+        dst_picture: Picture,
+        dst_window: Window,
         bg: Color,
         fg: Color,
+        is_tag: bool,
     ) -> Result<(), FontError> {
+        let text_width = self.text_width(&text);
+        let chunks = self.encode(&text, text_width as i16 - 1);
+
+        let text_picture = self.conn.generate_id()?;
+        let text_pixmap = self.conn.generate_id()?;
+
+        self.conn.create_pixmap(
+            self.visual_info.root.depth,
+            text_pixmap,
+            dst_window,
+            rect.w,
+            rect.h,
+        )?;
+
+        self.conn.render_create_picture(
+            text_picture,
+            text_pixmap,
+            self.visual_info.root.pict_format,
+            &CreatePictureAux::new().repeat(Repeat::NORMAL),
+        )?;
+
         let WRect { x, y, w, h } = rect;
         let fg_fill_area: Rectangle = WRect::new(0, y, w, h).into();
         let bg_fill_area: Rectangle = rect.into();
 
         self.conn
-            .render_fill_rectangles(PictOp::SRC, text.picture, fg, &[fg_fill_area])?;
+            .render_fill_rectangles(PictOp::SRC, text_picture, fg, &[fg_fill_area])?;
         self.conn
-            .render_fill_rectangles(PictOp::SRC, dst, bg, &[bg_fill_area])?;
+            .render_fill_rectangles(PictOp::SRC, dst_picture, bg, &[bg_fill_area])?;
 
-        let mut x_offset = x + text.horizontal_padding as i16;
-        for chunk in &text.chunks {
+        let mut x_offset = if is_tag {
+            x + ((w as i16 / 2) - (text_width as i16 / 2))
+        } else {
+            x + padding as i16
+        };
+
+        for chunk in &chunks {
             self.draw_glyphs(
                 x_offset,
                 y,
                 chunk.glyph_set,
-                text.picture,
-                dst,
+                text_picture,
+                dst_picture,
                 &chunk.glyph_ids,
             )?;
 
@@ -301,63 +345,5 @@ impl<'a, C: Connection> TextRenderer<'a, C> {
         self.conn
             .render_composite_glyphs16(PictOp::OVER, src, dst, 0, glyphs, 0, 0, &buf)?;
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Text {
-    pub chunks: Vec<FontEncodedChunk>,
-    pub picture: Picture,
-    pub pixmap: Pixmap,
-    pub text_width: i16,
-    pub text_height: u16,
-    pub box_width: u16,
-    pub box_height: u16,
-    pub vertical_padding: u16,
-    pub horizontal_padding: u16,
-}
-
-impl Text {
-    pub fn new<C: Connection>(
-        conn: &C,
-        font: &TextRenderer<C>,
-        vis_info: &RenderVisualInfo,
-        text: impl ToString,
-        parent: u32,
-        vertical_padding: u16,
-        horizontal_padding: u16,
-    ) -> Self {
-        let text = text.to_string();
-        let (text_width, text_height) = font.geometry(&text);
-        let chunks = font.encode(&text, text_width - 1);
-
-        let box_width = text_width as u16 + (horizontal_padding * 2);
-        let box_height = text_height as u16 + (vertical_padding * 2);
-
-        let picture = conn.generate_id().unwrap();
-        let pixmap = conn.generate_id().unwrap();
-
-        conn.create_pixmap(vis_info.root.depth, pixmap, parent, box_width, box_height)
-            .unwrap();
-
-        conn.render_create_picture(
-            picture,
-            pixmap,
-            vis_info.root.pict_format,
-            &CreatePictureAux::new().repeat(Repeat::NORMAL),
-        )
-        .unwrap();
-
-        Self {
-            chunks,
-            text_width,
-            text_height,
-            picture,
-            pixmap,
-            box_width,
-            box_height,
-            vertical_padding,
-            horizontal_padding,
-        }
     }
 }

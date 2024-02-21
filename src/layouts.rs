@@ -1,26 +1,7 @@
-use std::{cmp::Ordering, fmt};
-
-use x11rb::connection::Connection;
-
 use crate::{config::bar_height, config::theme::window::BORDER_WIDTH, monitor::WMonitor};
-use wwm_core::util::WRect;
-
-#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
-pub enum WLayout {
-    #[default]
-    MainStack,
-    Column,
-}
-
-impl fmt::Display for WLayout {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let symbol = match self {
-            WLayout::MainStack => "[]=",
-            WLayout::Column => "|||",
-        };
-        write!(f, "{symbol}")
-    }
-}
+use std::cmp::Ordering;
+use wwm_core::util::{WLayout, WRect};
+use x11rb::connection::Connection;
 
 pub fn layout_clients<C: Connection>(
     layout: &WLayout,

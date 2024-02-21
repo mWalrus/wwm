@@ -9,12 +9,12 @@ use crate::{
         theme::{self, window::BORDER_WIDTH},
     },
     keyboard::WKeyboard,
-    layouts::{layout_clients, WLayout},
+    layouts::layout_clients,
     monitor::WMonitor,
     mouse::WMouse,
     AtomCollection,
 };
-use wwm_core::util::{WConfigWindow, WPos, WRect};
+use wwm_core::util::{WConfigWindow, WLayout, WPos, WRect};
 
 use std::{
     collections::HashSet,
@@ -25,7 +25,7 @@ use std::{
     thread,
     time::Duration,
 };
-use wwm_core::{text::TextRenderer, visual::RenderVisualInfo};
+use wwm_core::text::TextRenderer;
 use x11rb::{
     connection::Connection,
     properties::WmSizeHints,
@@ -92,23 +92,15 @@ impl<'a, C: Connection> WinMan<'a, C> {
         // TODO: error handling
         let screen = &conn.setup().roots[screen_num];
 
-        conn.flush()?;
-
         Self::become_wm(conn, screen, mouse.cursors.normal)?;
         Self::run_auto_start_commands().unwrap();
 
-        let vis_info = Rc::new(RenderVisualInfo::new(conn, screen).unwrap());
-        let text_renderer = TextRenderer::new(
-            conn,
-            vis_info.render.pict_format,
-            theme::bar::FONT,
-            theme::bar::FONT_SIZE,
-        )
-        .unwrap();
+        let text_renderer =
+            TextRenderer::new(conn, screen, theme::bar::FONT, theme::bar::FONT_SIZE).unwrap();
         let text_renderer = Rc::new(text_renderer);
 
         let mut monitors: Vec<WMonitor<'a, C>> =
-            Self::get_monitors(conn, screen, &text_renderer, &vis_info)?.into();
+            Self::get_monitors(conn, screen, &text_renderer)?.into();
 
         let selmon = monitors.iter().position(|m| m.primary).unwrap_or(0);
         monitors[selmon].bar.set_is_focused(true);
@@ -137,16 +129,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         'eventloop: loop {
-            // self.refresh();
-            self.conn.flush()?;
-
             loop {
+                self.conn.flush()?;
                 if let Ok(Some(event)) = self.conn.poll_for_event() {
                     if self.handle_event(event)? == ShouldExit::Yes {
                         break 'eventloop;
                     }
-
-                    self.conn.flush()?;
                 }
                 for m in self.monitors.iter_mut() {
                     m.bar.draw(self.conn);
@@ -253,7 +241,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
                 let c = m.clients[ci];
                 (c.window, c.monitor)
             } else {
-                m.bar.update_title(self.conn, "");
+                m.bar.update_title("");
                 self.conn.set_input_focus(
                     InputFocus::POINTER_ROOT,
                     self.screen.root,
@@ -266,7 +254,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         self.conn.sync()?;
 
         let name = self.get_window_title(win)?;
-        self.monitors[mon].bar.update_title(self.conn, name);
+        self.monitors[mon].bar.update_title(name);
 
         self.conn
             .set_input_focus(InputFocus::POINTER_ROOT, win, CURRENT_TIME)?;
@@ -348,13 +336,12 @@ impl<'a, C: Connection> WinMan<'a, C> {
         conn: &'a C,
         screen: &Screen,
         text_renderer: &Rc<TextRenderer<'a, C>>,
-        vis_info: &Rc<RenderVisualInfo>,
     ) -> Result<Vec<WMonitor<'a, C>>, ReplyError> {
         let monitors = conn.randr_get_monitors(screen.root, true)?.reply()?;
         let monitors: Vec<WMonitor<C>> = monitors
             .monitors
             .iter()
-            .map(|m| WMonitor::new(m, conn, Rc::clone(text_renderer), Rc::clone(vis_info)))
+            .map(|m| WMonitor::new(m, conn, Rc::clone(text_renderer)))
             .collect();
         Ok(monitors)
     }
@@ -814,7 +801,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn adjust_main_width(&mut self, dir: WDirection) -> Result<(), ReplyOrIdError> {
-        let mut m = &mut self.monitors[self.selmon];
+        let m = &mut self.monitors[self.selmon];
         match dir {
             WDirection::Prev if m.width_factor - WIDTH_ADJUSTMENT_FACTOR >= 0.05 => {
                 m.width_factor -= WIDTH_ADJUSTMENT_FACTOR;
@@ -1040,9 +1027,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn handle_property_notify(&mut self, evt: PropertyNotifyEvent) -> Result<(), ReplyOrIdError> {
         if evt.atom == self.atoms._NET_WM_NAME {
             let title = self.get_window_title(evt.window)?;
-            self.monitors[self.selmon]
-                .bar
-                .update_title(self.conn, title);
+            self.monitors[self.selmon].bar.update_title(title);
         }
         Ok(())
     }
@@ -1187,7 +1172,6 @@ impl<'a, C: Connection> WinMan<'a, C> {
         for (mi, m) in self.monitors.iter().enumerate() {
             for (ci, c) in m.clients.iter().enumerate() {
                 if c.window == win {
-                    drop(m);
                     return Some((mi, ci));
                 }
             }
@@ -1270,9 +1254,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
         } else {
             String::new()
         };
-        self.monitors[self.selmon]
-            .bar
-            .update_title(self.conn, title);
+        self.monitors[self.selmon].bar.update_title(title);
 
         self.recompute_layout(self.selmon)?;
         self.focus()?;
@@ -1394,7 +1376,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     fn update_layout(&mut self, layout: WLayout) {
         let m = &mut self.monitors[self.selmon];
         if m.set_layout(layout) {
-            m.bar.update_layout_symbol(self.conn, m.layout.to_string());
+            m.bar.update_layout_symbol(m.layout);
             self.recompute_layout(self.selmon).unwrap();
         }
     }

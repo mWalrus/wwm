@@ -14,7 +14,7 @@ use x11rb::{
     rust_connection::{ConnectionError, ReplyOrIdError},
 };
 
-use crate::{util::WRect, visual::VisualError};
+use crate::{util::primitives::WRect, visual::VisualError};
 
 use crate::visual::RenderVisualInfo;
 

@@ -8,7 +8,7 @@ use std::{
 use status_module::{WBarModMask, WBarModule};
 use wwm_core::{
     text::TextRenderer,
-    util::{WBarOptions, WLayout, WRect},
+    util::{bar::WBarOptions, primitives::WRect, WLayout},
 };
 use x11rb::{
     connection::Connection,

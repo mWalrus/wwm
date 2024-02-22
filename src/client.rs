@@ -1,7 +1,7 @@
 use x11rb::{properties::WmSizeHints, protocol::xproto::Window};
 
 use crate::config::theme::window::BORDER_WIDTH;
-use wwm_core::util::{WRect, WSize};
+use wwm_core::util::primitives::{WRect, WSize};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct WClientState {

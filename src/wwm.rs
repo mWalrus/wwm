@@ -14,7 +14,10 @@ use crate::{
     mouse::WMouse,
     AtomCollection,
 };
-use wwm_core::util::{WConfigWindow, WLayout, WPos, WRect};
+use wwm_core::util::{
+    primitives::{WPos, WRect},
+    WConfigWindow, WLayout,
+};
 
 use std::{
     collections::HashSet,
@@ -1211,7 +1214,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
 
     fn run_auto_start_commands() -> Result<(), std::io::Error> {
         for cmd in AUTO_START_COMMANDS {
-            if let Some((bin, args)) = wwm_core::util::cmd_bits(cmd) {
+            if let Some((bin, args)) = wwm_core::util::cmd::format(cmd) {
                 Command::new(bin).args(args).spawn()?;
             }
         }
@@ -1292,7 +1295,7 @@ impl<'a, C: Connection> WinMan<'a, C> {
     }
 
     fn spawn_program(&self, cmd: &'static [&'static str]) {
-        if let Some((bin, args)) = wwm_core::util::cmd_bits(cmd) {
+        if let Some((bin, args)) = wwm_core::util::cmd::format(cmd) {
             Command::new(bin).args(args).spawn().unwrap();
         }
     }

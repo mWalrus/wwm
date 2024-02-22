@@ -1,12 +1,15 @@
 use std::rc::Rc;
 
 use wwm_bar::WBar;
-use wwm_core::{text::TextRenderer, visual::RenderVisualInfo};
+use wwm_core::{
+    text::TextRenderer,
+    util::{WBarColors, WBarOptions, WLayout},
+};
 use x11rb::{
     connection::Connection,
     protocol::{
         randr::MonitorInfo,
-        xproto::{ConfigureWindowAux, ConnectionExt, Rectangle},
+        xproto::{ConfigureWindowAux, ConnectionExt},
     },
     xcb_ffi::ReplyOrIdError,
 };
@@ -18,7 +21,6 @@ use crate::{
         tags::{MAIN_CLIENT_WIDTH_PERCENTAGE, TAG_CAP},
         theme,
     },
-    layouts::WLayout,
 };
 use wwm_core::util::{StateError, WPos, WRect};
 
@@ -35,39 +37,39 @@ pub struct WMonitor<'a, C: Connection> {
 }
 
 impl<'a, C: Connection> WMonitor<'a, C> {
-    pub fn new(
-        mi: &MonitorInfo,
-        conn: &'a C,
-        text_renderer: Rc<TextRenderer<'a, C>>,
-        vis_info: Rc<RenderVisualInfo>,
-    ) -> Self {
+    pub fn new(mi: &MonitorInfo, conn: &'a C, text_renderer: Rc<TextRenderer<'a, C>>) -> Self {
         let layout = WLayout::MainStack;
 
-        let bar_rect = Rectangle {
+        let bar_rect = WRect {
             x: mi.x,
             y: mi.y,
-            width: mi.width,
-            height: theme::bar::FONT_SIZE as u16 + (theme::bar::PADDING * 2),
+            w: mi.width,
+            h: theme::bar::FONT_SIZE as u16 + (theme::bar::PADDING * 2),
         };
 
-        let y = bar_rect.y + bar_rect.height as i16;
-        let height = mi.height - bar_rect.height;
+        let y = bar_rect.y + bar_rect.h as i16;
+        let height = mi.height - bar_rect.h;
+
+        let colors = WBarColors::new(
+            theme::bar::FG,
+            theme::bar::BG,
+            theme::bar::FG_SELECTED,
+            theme::bar::BG_SELECTED,
+        );
+
+        let bar_options = WBarOptions {
+            rect: bar_rect,
+            padding: theme::bar::PADDING,
+            section_padding: theme::bar::SECTION_PADDING,
+            tag_count: TAG_CAP,
+            tag_width: theme::bar::TAG_WIDTH,
+            colors,
+        };
+
         let bar = WBar::new(
             conn,
             text_renderer,
-            vis_info,
-            bar_rect,
-            theme::bar::PADDING,
-            theme::bar::SECTION_PADDING,
-            TAG_CAP,
-            layout.to_string(),
-            "",
-            [
-                theme::bar::FG,
-                theme::bar::BG,
-                theme::bar::BG_SELECTED,
-                theme::bar::FG_SELECTED,
-            ],
+            bar_options,
             *theme::bar::MODULE_MASK,
             theme::bar::STATUS_INTERVAL,
         );

@@ -11,6 +11,8 @@ pub mod theme {
     pub mod bar {
         use lazy_static::lazy_static;
         use wwm_bar::status_module::WBarModMask;
+
+        pub const TAG_WIDTH: u16 = 30;
         // these selected colors are used for workspace tags in the bar
         pub const BG_SELECTED: u32 = 0xca9ee6;
         pub const FG_SELECTED: u32 = 0x232634;
@@ -81,7 +83,7 @@ pub mod mouse {
 pub mod commands {
     use crate::command::{WDirection, WKeyCommand};
     use crate::keyboard::keybind::WKeybind;
-    use crate::layouts::WLayout;
+    use wwm_core::util::WLayout;
     use x11rb::protocol::xproto::ModMask;
     use xkbcommon::xkb::keysyms as ks;
 

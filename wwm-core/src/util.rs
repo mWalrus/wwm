@@ -5,6 +5,52 @@ use x11rb::protocol::{
 };
 
 #[derive(Default, Debug, Clone, Copy)]
+pub struct WBarOptions {
+    pub rect: WRect,
+    pub padding: u16,
+    pub section_padding: i16,
+    pub tag_count: usize,
+    pub tag_width: u16,
+    pub colors: WBarColors,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct WBarColors {
+    pub fg: (u32, Color),
+    pub bg: (u32, Color),
+    pub selected_fg: (u32, Color),
+    pub selected_bg: (u32, Color),
+}
+
+impl WBarColors {
+    pub fn new(fg: u32, bg: u32, selected_fg: u32, selected_bg: u32) -> Self {
+        Self {
+            fg: (fg, hex_to_rgba_color(fg)),
+            bg: (bg, hex_to_rgba_color(bg)),
+            selected_fg: (selected_fg, hex_to_rgba_color(selected_fg)),
+            selected_bg: (selected_bg, hex_to_rgba_color(selected_bg)),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
+pub enum WLayout {
+    #[default]
+    MainStack,
+    Column,
+}
+
+impl std::fmt::Display for WLayout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let symbol = match self {
+            WLayout::MainStack => "[]=",
+            WLayout::Column => "|||",
+        };
+        write!(f, "{symbol}")
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy)]
 pub struct WRect {
     pub x: i16,
     pub y: i16,

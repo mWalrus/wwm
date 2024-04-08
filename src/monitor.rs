@@ -1,9 +1,13 @@
 use std::rc::Rc;
 
+use thiserror::Error;
 use wwm_bar::WBar;
 use wwm_core::{
     text::TextRenderer,
-    util::{WBarColors, WBarOptions, WLayout},
+    util::{
+        bar::{WBarColors, WBarOptions},
+        WLayout,
+    },
 };
 use x11rb::{
     connection::Connection,
@@ -22,7 +26,13 @@ use crate::{
         theme,
     },
 };
-use wwm_core::util::{StateError, WPos, WRect};
+use wwm_core::util::primitives::{WPos, WRect};
+
+#[derive(Error, Debug)]
+pub enum StateError {
+    #[error("{0} is out of bounds")]
+    Bounds(usize),
+}
 
 pub struct WMonitor<'a, C: Connection> {
     pub conn: &'a C,

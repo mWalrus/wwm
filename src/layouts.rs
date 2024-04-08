@@ -1,6 +1,6 @@
 use crate::{config::bar_height, config::theme::window::BORDER_WIDTH, monitor::WMonitor};
 use std::cmp::Ordering;
-use wwm_core::util::{WLayout, WRect};
+use wwm_core::util::{primitives::WRect, WLayout};
 use x11rb::connection::Connection;
 
 pub fn layout_clients<C: Connection>(

@@ -8,10 +8,12 @@ mod mouse;
 mod wwm;
 
 use keyboard::WKeyboard;
+use lazy_static::lazy_static;
 use mouse::WMouse;
 use wwm::WinMan;
 use x11rb::atom_manager;
 use x11rb::connection::Connection;
+use x11rb::protocol::xproto::Screen;
 use x11rb::xcb_ffi::XCBConnection;
 
 atom_manager! {
@@ -45,23 +47,47 @@ atom_manager! {
     }
 }
 
+pub struct X11Handle {
+    conn: XCBConnection,
+    xcb_conn: xcb::Connection,
+    atoms: AtomCollection,
+    screen_num: usize,
+}
+
+impl X11Handle {
+    pub fn screen(&self) -> &Screen {
+        &self.conn.setup().roots[self.screen_num]
+    }
+}
+
+lazy_static! {
+    pub static ref X_HANDLE: X11Handle = {
+        let (xcb_conn, screen_num) = xcb::Connection::connect(None).unwrap();
+        let screen_num = usize::try_from(screen_num).unwrap();
+
+        let conn = {
+            let raw_conn = xcb_conn.get_raw_conn().cast();
+            unsafe { XCBConnection::from_raw_xcb_connection(raw_conn, false) }
+        }
+        .unwrap();
+        let atoms = AtomCollection::new(&conn).unwrap();
+        let atoms = atoms.reply().unwrap();
+
+        X11Handle {
+            conn,
+            xcb_conn,
+            atoms,
+            screen_num,
+        }
+    };
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (xcb_conn, screen_num) = xcb::Connection::connect(None)?;
-    let screen_num = usize::try_from(screen_num)?;
+    let keyboard = WKeyboard::new(&X_HANDLE.conn, &X_HANDLE.xcb_conn, X_HANDLE.screen())?;
 
-    let conn = {
-        let raw_conn = xcb_conn.get_raw_conn().cast();
-        unsafe { XCBConnection::from_raw_xcb_connection(raw_conn, false) }
-    }?;
+    let mouse = WMouse::new(&X_HANDLE.conn, X_HANDLE.screen_num);
 
-    let atoms = AtomCollection::new(&conn)?;
-    let atoms = atoms.reply()?;
-
-    let screen = &conn.setup().roots[screen_num];
-    let keyboard = WKeyboard::new(&conn, &xcb_conn, screen)?;
-    let mouse = WMouse::new(&conn, screen_num);
-
-    let mut wwm = WinMan::init(&conn, screen_num, keyboard, mouse, atoms)?;
+    let mut wwm = WinMan::init(keyboard, mouse)?;
     wwm.run()?;
     Ok(())
 }
